@@ -2694,6 +2694,17 @@ static Sys_var_ulong Sys_optimizer_search_depth(
        SESSION_VAR(optimizer_search_depth), CMD_LINE(REQUIRED_ARG),
        VALID_RANGE(0, MAX_TABLES+1), DEFAULT(MAX_TABLES+1), BLOCK_SIZE(1));
 
+static Sys_var_ulong Sys_optimizer_order_cost_factor(
+        "optimizer_order_cost_factor",
+        "Maximum depth of search performed by the query optimizer. Values "
+                "larger than the number of relations in a query result in better "
+                "query plans, but take longer to compile a query. Values smaller "
+                "than the number of tables in a relation result in faster "
+                "optimization, but may produce very bad query plans. If set to 0, "
+                "the system will automatically pick a reasonable value",
+        SESSION_VAR(optimizer_order_cost_factor), CMD_LINE(REQUIRED_ARG),
+        VALID_RANGE(0, 100000), DEFAULT(2), BLOCK_SIZE(1));
+
 static Sys_var_ulong Sys_range_optimizer_max_mem_size(
       "range_optimizer_max_mem_size",
       "Maximum amount of memory used by the range optimizer "

@@ -1155,8 +1155,9 @@ bool Protocol_classic::send_field_metadata(Send_field *field,
     pos[6]= field->type;
     int2store(pos + 7, field->flags);
     pos[9]= (char) field->decimals;
-    pos[10]= 0;        // For the future
-    pos[11]= 0;        // For the future
+    int2store(pos + 10, item_charset->number);
+    //pos[10]= 0;        // For the future
+    //pos[11]= 0;        // For the future
     pos+= 12;
   }
   else

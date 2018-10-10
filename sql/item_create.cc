@@ -2172,6 +2172,17 @@ protected:
   virtual ~Create_func_instr() {}
 };
 
+class Create_func_regexp_substr : public Create_func_arg2
+{
+public:
+    virtual Item *create(THD *thd, Item *arg1, Item *arg2);
+
+    static Create_func_regexp_substr s_singleton;
+
+protected:
+    Create_func_regexp_substr() {}
+    virtual ~Create_func_regexp_substr() {}
+};
 
 class Create_func_interiorringn : public Create_func_arg2
 {
@@ -5545,6 +5556,13 @@ Create_func_instr::create(THD *thd, Item *arg1, Item *arg2)
   return new (thd->mem_root) Item_func_instr(POS(), arg1, arg2);
 }
 
+Create_func_regexp_substr Create_func_regexp_substr::s_singleton;
+
+Item*
+Create_func_regexp_substr::create(THD *thd, Item *arg1, Item *arg2)
+{
+  return new (thd->mem_root) Item_func_regexp_substr(POS(), arg1, arg2);
+}
 
 Create_func_interiorringn Create_func_interiorringn::s_singleton;
 
@@ -7515,6 +7533,7 @@ static Native_func_registry func_array[] =
   { { C_STRING_WITH_LEN("IS_IPV4_COMPAT") }, BUILDER(Create_func_is_ipv4_compat)},
   { { C_STRING_WITH_LEN("IS_IPV4_MAPPED") }, BUILDER(Create_func_is_ipv4_mapped)},
   { { C_STRING_WITH_LEN("INSTR") }, BUILDER(Create_func_instr)},
+  { { C_STRING_WITH_LEN("REGEXP_SUBSTR") }, BUILDER(Create_func_regexp_substr)},
   { { C_STRING_WITH_LEN("INTERIORRINGN") }, GEOM_BUILDER(Create_func_interiorringn_deprecated)},
   { { C_STRING_WITH_LEN("INTERSECTS") }, GEOM_BUILDER(Create_func_intersects_deprecated)},
   { { C_STRING_WITH_LEN("ISCLOSED") }, GEOM_BUILDER(Create_func_isclosed_deprecated)},

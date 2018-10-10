@@ -4600,7 +4600,6 @@ bool Item_load_file::itemize(Parse_context *pc, Item **res)
 
 
 #include <my_dir.h>				// For my_stat
-#include <my_regex.h>
 
 String *Item_load_file::val_str(String *str)
 {
@@ -4988,6 +4987,7 @@ longlong Item_func_crc32::val_int()
 
 #ifdef HAVE_COMPRESS
 #include "zlib.h"
+#include "../regex/my_regex.h"
 
 String *Item_func_compress::val_str(String *str)
 {

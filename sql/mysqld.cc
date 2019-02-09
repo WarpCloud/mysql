@@ -2371,6 +2371,7 @@ SHOW_VAR com_status_vars[]= {
   {"binlog",               (char*) offsetof(STATUS_VAR, com_stat[(uint) SQLCOM_BINLOG_BASE64_EVENT]),        SHOW_LONG_STATUS, SHOW_SCOPE_ALL},
   {"call_procedure",       (char*) offsetof(STATUS_VAR, com_stat[(uint) SQLCOM_CALL]),                       SHOW_LONG_STATUS, SHOW_SCOPE_ALL},
   {"change_db",            (char*) offsetof(STATUS_VAR, com_stat[(uint) SQLCOM_CHANGE_DB]),                  SHOW_LONG_STATUS, SHOW_SCOPE_ALL},
+  {"change_effective_user",(char*) offsetof(STATUS_VAR, com_stat[(uint) SQLCOM_CHANGE_EFFECTIVE_USER]),      SHOW_LONG_STATUS, SHOW_SCOPE_ALL},
   {"change_master",        (char*) offsetof(STATUS_VAR, com_stat[(uint) SQLCOM_CHANGE_MASTER]),              SHOW_LONG_STATUS, SHOW_SCOPE_ALL},
   {"change_repl_filter",   (char*) offsetof(STATUS_VAR, com_stat[(uint) SQLCOM_CHANGE_REPLICATION_FILTER]),  SHOW_LONG_STATUS, SHOW_SCOPE_ALL},
   {"check",                (char*) offsetof(STATUS_VAR, com_stat[(uint) SQLCOM_CHECK]),                      SHOW_LONG_STATUS, SHOW_SCOPE_ALL},

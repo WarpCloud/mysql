@@ -1807,6 +1807,14 @@ help:
 /* change master */
 
 change:
+          CHANGE USER TO_SYM user
+           {
+             LEX *lex=Lex;
+             lex->sql_command= SQLCOM_CHANGE_EFFECTIVE_USER;
+             lex->grant_user=$4;
+             lex->grant_user->auth= NULL_CSTR;
+           }
+        |
           CHANGE MASTER_SYM TO_SYM
           {
             LEX *lex = Lex;

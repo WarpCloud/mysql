@@ -4988,6 +4988,11 @@ end_with_restore_list:
       my_ok(thd);
     break;
   }
+  case SQLCOM_CHANGE_EFFECTIVE_USER:
+  {
+    res = change_effective_user(thd);
+    break;
+  }
 #endif
   default:
 #ifndef EMBEDDED_LIBRARY

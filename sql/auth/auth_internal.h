@@ -60,9 +60,9 @@ ACL_PROXY_USER * acl_find_proxy_user(const char *user,
                                      bool *proxy_used);
 // support for change effective user
 ACL_PROXY_USER * acl_check_proxy_user(const char *user,
-									  const char *host,
-									  const char *ip,
-									  const char *proxied_user);
+                                      const char *host,
+                                      const char *ip,
+                                      const char *proxied_user);
 bool set_user_salt(ACL_USER *acl_user);
 void acl_insert_proxy_user(ACL_PROXY_USER *new_value);
 

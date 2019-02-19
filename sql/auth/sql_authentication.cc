@@ -2613,6 +2613,10 @@ int change_effective_user(THD *thd) {
     // we want to respect the proxy privilege definition. but to avoid confusion,
     // the proxied host should always be set to '%'
     proxied_host = proxy_user->get_proxied_host();
+  } else {
+    // if the user want to change to oneself, the host would be the one
+    // for which has been authenticated
+    proxied_host = sctx->host_or_ip().str;
   }
 
   acl_user = find_acl_user(proxied_host, target_user->user.str, TRUE);

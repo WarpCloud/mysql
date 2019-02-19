@@ -2622,10 +2622,21 @@ int change_effective_user(THD *thd) {
     thd->get_stmt_da()->set_error_status(ER_ACCESS_DENIED_ERROR, "Target User Not Found", "HY000");
     DBUG_RETURN(1);
   }
-
   sctx->set_master_access(acl_user->access);
   assign_priv_user_host(sctx, acl_user);
   mysql_mutex_unlock(&acl_cache->lock);
+
+  // update db access to the new user's
+  ulong db_access = 0;
+  if (thd->db().str) {
+    if (is_infoschema_db(thd->db().str, thd->db().length))
+      db_access = SELECT_ACL;
+    else
+      db_access = sctx->check_access(DB_ACLS) ? DB_ACLS :
+                  acl_get(sctx->host().str, sctx->ip().str, sctx->priv_user().str, thd->db().str, false) | sctx->master_access();
+  }
+  sctx->set_db_access(db_access);
+
   my_ok(thd);
   DBUG_RETURN(0);
 }

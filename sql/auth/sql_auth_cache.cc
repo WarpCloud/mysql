@@ -957,6 +957,54 @@ acl_find_proxy_user(const char *user, const char *host, const char *ip,
   DBUG_RETURN(NULL);
 }
 
+/**
+  Validate if a user can proxy as another user. Proxy to anonymous account
+  is allowed so we could construct a super proxy user that can proxy as any
+  user@'%'. Proxy to a specific host is not supported.
+
+  @thd                     current thread
+  @param user              the logged in user (proxy user)
+  @param proxied_user      the effective user a user is trying to
+                           impersonate as (proxied user)
+  @return                  proxy user definition
+    @retval NULL           proxy user definition not found or not applicable
+    @retval non-null       the proxy user data
+*/
+
+ACL_PROXY_USER * acl_check_proxy_user(const char *user,
+                                      const char *host,
+                                      const char *ip,
+                                      const char *proxied_user)
+{
+  DBUG_ENTER("acl_check_proxy_user");
+  DBUG_PRINT("info", ("user=%s host=%s ip=%s proxied_user=%s",
+          user, host, ip, proxied_user));
+
+  if (!strcmp(proxied_user, user))
+  {
+    DBUG_PRINT ("info", ("user is the same as proxied_user"));
+    DBUG_RETURN (NULL);
+  }
+
+  for (ACL_PROXY_USER *proxy= acl_proxy_users->begin();
+       proxy != acl_proxy_users->end(); ++proxy)
+  {
+    // checks if the user has the privilege to do the proxy. proxy to the anonymous
+    // user is allowed so we could construct a super proxy user that could proxy any
+    // user@'%'
+    if (proxy->matches(host, user, ip, proxied_user, FALSE))
+    {
+      DBUG_PRINT("info", ("proxy matched=%s@%s",
+              proxy->get_proxied_user(),
+              proxy->get_proxied_host()));
+      DBUG_RETURN(proxy);
+    }
+  }
+
+  // the user doesn't have the proxy privilege
+  DBUG_PRINT("info", ("No matching users found, returning null"));
+  DBUG_RETURN(NULL);
+}
 
 static uchar* acl_entry_get_key(acl_entry *entry, size_t *length,
                                 my_bool not_used MY_ATTRIBUTE((unused)))

@@ -3343,6 +3343,20 @@ protected:
 };
 
 
+class Create_func_priv_user : public Create_native_func
+{
+public:
+    virtual Item *create_native(THD *thd, LEX_STRING name,
+                                PT_item_list *item_list);
+
+    static Create_func_priv_user s_singleton;
+
+protected:
+    Create_func_priv_user() {}
+    virtual ~Create_func_priv_user() {}
+};
+
+
 class Create_func_quote : public Create_func_arg1
 {
 public:
@@ -6826,6 +6840,16 @@ Create_func_pow::create(THD *thd, Item *arg1, Item *arg2)
 }
 
 
+Create_func_priv_user Create_func_priv_user::s_singleton;
+
+Item *
+Create_func_priv_user::create_native(THD *thd, LEX_STRING name,
+                                     PT_item_list *item_list)
+{
+  return new (thd->mem_root) Item_func_priv_user(POS());
+}
+
+
 Create_func_quote Create_func_quote::s_singleton;
 
 Item*
@@ -7633,6 +7657,7 @@ static Native_func_registry func_array[] =
   { { C_STRING_WITH_LEN("POLYGONFROMWKB") }, GEOM_BUILDER(Create_func_polygonfromwkb_deprecated)},
   { { C_STRING_WITH_LEN("POW") }, BUILDER(Create_func_pow)},
   { { C_STRING_WITH_LEN("POWER") }, BUILDER(Create_func_pow)},
+  { { C_STRING_WITH_LEN("PRIV_USER") }, BUILDER(Create_func_priv_user)},
   { { C_STRING_WITH_LEN("QUOTE") }, BUILDER(Create_func_quote)},
   { { C_STRING_WITH_LEN("RADIANS") }, BUILDER(Create_func_radians)},
   { { C_STRING_WITH_LEN("RAND") }, BUILDER(Create_func_rand)},

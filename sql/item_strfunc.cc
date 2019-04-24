@@ -2513,6 +2513,14 @@ bool Item_func_current_user::fix_fields(THD *thd, Item **ref)
 }
 
 
+bool Item_func_priv_user::fix_fields(THD *thd, Item **ref)
+{
+  return (Item_func_sysconst::fix_fields(thd, ref) ||
+          init(thd->m_main_security_ctx.priv_user().str,
+               thd->m_main_security_ctx.priv_host().str));
+}
+
+
 void Item_func_soundex::fix_length_and_dec()
 {
   uint32 char_length= args[0]->max_char_length();

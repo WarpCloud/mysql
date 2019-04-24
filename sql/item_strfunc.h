@@ -698,6 +698,24 @@ public:
 };
 
 
+class Item_func_priv_user :public Item_func_user
+{
+    typedef Item_func_user super;
+
+    Name_resolution_context *context;
+
+public:
+    explicit Item_func_priv_user(const POS &pos) : super(pos) {}
+
+    // virtual bool itemize(Parse_context *pc, Item **res);
+
+    bool fix_fields(THD *thd, Item **ref);
+    const char *func_name() const { return "priv_user"; }
+    const Name_string fully_qualified_func_name() const
+    { return NAME_STRING("priv_user()"); }
+};
+
+
 class Item_func_soundex :public Item_str_func
 {
   String tmp_value;

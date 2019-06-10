@@ -515,6 +515,8 @@ ulong stored_program_cache_size= 0;
 */
 my_bool avoid_temporal_upgrade;
 
+my_bool opt_debug_change_user;
+
 const double log_10[] = {
   1e000, 1e001, 1e002, 1e003, 1e004, 1e005, 1e006, 1e007, 1e008, 1e009,
   1e010, 1e011, 1e012, 1e013, 1e014, 1e015, 1e016, 1e017, 1e018, 1e019,

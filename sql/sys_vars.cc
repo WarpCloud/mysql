@@ -5684,3 +5684,9 @@ static Sys_var_charptr Sys_disabled_storage_engines(
        READ_ONLY GLOBAL_VAR(opt_disabled_storage_engines),
        CMD_LINE(REQUIRED_ARG), IN_SYSTEM_CHARSET,
        DEFAULT(""));
+
+static Sys_var_mybool Sys_debug_change_user(
+        "debug_change_effective_user",
+        "print debug info into error log for change effective user",
+        GLOBAL_VAR(opt_debug_change_user),
+        CMD_LINE(OPT_ARG), DEFAULT(FALSE));

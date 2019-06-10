@@ -830,6 +830,8 @@ extern char *opt_ssl_ca, *opt_ssl_capath, *opt_ssl_cert, *opt_ssl_cipher,
 
 
 extern char *opt_disabled_storage_engines;
+
+extern my_bool opt_debug_change_user;
 /**
   only options that need special treatment in get_one_option() deserve
   to be listed below

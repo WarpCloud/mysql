@@ -2596,6 +2596,15 @@ int change_effective_user(THD *thd) {
     DBUG_RETURN(1);
   }
 
+  if (opt_debug_change_user) {
+    // assert: target user must be of form u@% or u@''
+    sql_print_information("change effective user: auth user %s@'%s', target user %s@'%s'",
+                          sctx->user().str,
+                          sctx->host().str,
+                          target_user->user.str,
+                          target_user->host.str);
+  }
+
   // an authenticated user is allowed to proxy as himself. yet still need to look up
   // the acl list to keep the auth info updated
   mysql_mutex_lock(&acl_cache->lock);
@@ -2612,14 +2621,34 @@ int change_effective_user(THD *thd) {
     }
     // we want to respect the proxy privilege definition. but to avoid confusion,
     // the proxied host should always be set to '%'
-    proxied_host = proxy_user->get_proxied_host();
+    proxied_host = proxy_user->get_proxied_host() ? proxy_user->get_proxied_host() : "%";
+    if (opt_debug_change_user) {
+      // assert: now the target user would be u@?, according to the proxy user def
+      // the host could be empty, '%', or a concrete value
+      sql_print_information("change effective user: found proxied user %s@'%s'",
+                            proxy_user->get_proxied_user(),
+                            proxy_user->get_proxied_host());
+    }
   } else {
     // if the user want to change to oneself, the host would be the one
     // for which has been authenticated
     proxied_host = sctx->host_or_ip().str;
+    if (opt_debug_change_user) {
+      // assert: the target user should be the same as auth user, proxied host must not
+      // be empty
+      sql_print_information("change effective user: change to oneself, user %s@'%s'",
+                            auth_user.str,
+                            proxied_host);
+    }
   }
 
-  acl_user = find_acl_user(proxied_host, target_user->user.str, TRUE);
+  if (opt_debug_change_user) {
+    sql_print_information("change effective user: looking for acl user %s@'%s'",
+                          target_user->user.str,
+                          proxied_host);
+  }
+
+  acl_user = find_acl_user(proxied_host, target_user->user.str, FALSE);
   if (!acl_user) {
     mysql_mutex_unlock(&acl_cache->lock);
     thd->set_row_count_func(0);
@@ -2628,6 +2657,11 @@ int change_effective_user(THD *thd) {
   }
   sctx->set_master_access(acl_user->access);
   assign_priv_user_host(sctx, acl_user);
+  if (opt_debug_change_user) {
+    sql_print_information("change effective user: set priv user %s@'%s'",
+                          acl_user->user,
+                          acl_user->host.get_host());
+  }
   mysql_mutex_unlock(&acl_cache->lock);
 
   // update db access to the new user's

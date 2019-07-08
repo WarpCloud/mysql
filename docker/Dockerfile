@@ -1,4 +1,4 @@
-FROM 172.16.1.99/transwarp/kundb/compile-mariadb:v1.0 AS compile
+FROM 172.16.1.99/kundb/mysql-compiler:latest AS compile
 
 COPY . /root/mysql_src
 RUN mkdir /root/mysql_bld && \
@@ -8,7 +8,7 @@ RUN mkdir /root/mysql_bld && \
     make install && \
     cd /root && rm -fr mysql_bld mysql_srcs
 
-FROM 172.16.1.99/transwarp/kundb/compile-mariadb:v1.0 AS release
+FROM 172.16.1.99/kundb/ubuntu:16.04 AS release
 
 COPY --from=compile /usr/local/mysql57 /usr/local/mysql57
 

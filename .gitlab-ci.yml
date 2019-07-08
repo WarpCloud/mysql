@@ -1,4 +1,4 @@
-image: 172.16.1.99/transwarp/base/builder:centos7-kundb
+image: 172.16.1.99/kundb/builder:centos7
 
 before_script:
   - time=`date "+%Y-%m-%d-%H-%M-%S"`

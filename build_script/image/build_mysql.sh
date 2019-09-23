@@ -10,7 +10,7 @@ function NOT_ALLOWED_BRANCH_TEST() {
   fi
 }
 
-function build_mariadb() {
+function build_mysql() {
   ## The function name should be the same as script's name
   set -e
 

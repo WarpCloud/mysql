@@ -1,46 +1,42 @@
 image: 172.16.1.99/kundb/builder:centos7
 
+variables:
+  GIT_SUBMODULE_STRATEGY: normal
+
 before_script:
-  - time=`date "+%Y-%m-%d-%H-%M-%S"`
-  - export MYSQL_SRC=`pwd`
-  - export BUILD_IMAGE="N"
-  - export DEPLOY_JAR="N"
-  - export KunDB_Version="kundb_1.1"
-  - if [ "${CI_COMMIT_REF_NAME}" = "kundb-mysql-5.7.18" ]; then
-  -   export BRANCH_NAME="mysql57_for_$KunDB_Version"
-  - else
-  -   export BRANCH_NAME="${CI_COMMIT_REF_NAME}"
-  - fi
-  - imageTag="${BRANCH_NAME}-${time}-${CI_COMMIT_SHA}"
-  - export IMAGE_TAG=${imageTag}
-  - export COMPONENT_BASE="${CI_PROJECT_NAME}"
-  - export DOCKER_REPO_URL="172.16.1.99"
-  - export OSINFO="ubuntu-14.04"
-  - export DEV_ROOT="/OLTP/mysql"
+  - source ${CI_PROJECT_DIR}/ci/ci_scripts/before_script.env
 
 stages:
-  - postcommit_build
+  - postcommit
+  - gold
+  - release
 
-postcommit_build:
-  stage: postcommit_build
+postcommit:
+  stage: postcommit
   script:
-    - echo "postcommit build"
-    - startdocker.sh &
-    - trap "kill -9 $(ps aux | grep dockerd | grep -v grep |  awk '{print $2}')"  ERR
-    - sleep 20s
-    - export BUILD_IMAGE="Y"
-    - export BUILDER="postcommit"
-    - export ENABLE_OVERLAY=true
-    - cd $MYSQL_SRC
-    - git clone http://gitlab-ci-token:${CI_JOB_TOKEN}@172.16.1.41:10080/InfraTools/packageRelease.git script
-    - mkdir -p script/build_utils/image
-    - cp build_script/image/build_${CI_PROJECT_NAME}.sh script/build_utils/image/build_${CI_PROJECT_NAME}.sh
-    - mkdir -p ~/.docker && cp /root/.docker/config.json ~/.docker/ || true
-    - set -e && bash -x script/jenkins_job_build.sh
-    - docker tag ${DOCKER_REPO_URL}/${BUILDER}/${COMPONENT_BASE}:${IMAGE_TAG} ${DOCKER_REPO_URL}/${BUILDER}/${COMPONENT_BASE}:${BRANCH_NAME}
-    - docker push ${DOCKER_REPO_URL}/${BUILDER}/${COMPONENT_BASE}:${BRANCH_NAME}
-    - kill -9 $(ps aux | grep dockerd | grep -v grep |  awk '{print $2}')
+    - ${CI_SRC}/postcommit.sh
   only:
-    - kundb-mysql-5.7.18
+    - master@OLTP/mysql
+    - kundb-1.1@OLTP/mysql
+  tags:
+    - k8s
+
+gold:
+  stage: gold
+  script:
+    - ${CI_SRC}/gold.sh
+  only:
+    - master@OLTP/mysql
+    - kundb-1.1@OLTP/mysql
+  tags:
+    - k8s
+
+release:
+  stage: release
+  script:
+    - ${CI_SRC}/release.sh
+  only:
+    - master@OLTP/mysql
+    - kundb-1.1@OLTP/mysql
   tags:
     - k8s

@@ -1,4 +1,4 @@
-image: 172.16.1.99/kundb/builder:centos7
+image: 172.16.1.99/kundb/x86_64/builder:centos7
 
 variables:
   GIT_SUBMODULE_STRATEGY: normal

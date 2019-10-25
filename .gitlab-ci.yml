@@ -18,6 +18,7 @@ postcommit:
   only:
     - master@OLTP/mysql
     - kundb-1.1@OLTP/mysql
+    - kundb-1.2@OLTP/mysql
   tags:
     - k8s
 
@@ -28,6 +29,7 @@ gold:
   only:
     - master@OLTP/mysql
     - kundb-1.1@OLTP/mysql
+    - kundb-1.2@OLTP/mysql
   tags:
     - k8s
 
@@ -38,5 +40,6 @@ release:
   only:
     - master@OLTP/mysql
     - kundb-1.1@OLTP/mysql
+    - kundb-1.2@OLTP/mysql
   tags:
     - k8s

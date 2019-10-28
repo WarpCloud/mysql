@@ -18,7 +18,7 @@ set -e
 IS_RELEASE_BRANCH
 echo "tag release image, push to 172.16.1.99/kundb repo."
 ${CI_SRC}/startdocker.sh &
-mkdir -p ~/.docker && cp /root/.docker/config.json ~/.docker/ || true
+mkdir -p ~/.docker && cp /root/.docker/kundb.json ~/.docker/ || true
 trap "kill -9 $(ps aux | grep dockerd | grep -v grep | awk '{print $2}')" ERR
 sleep $(echo ${SECOND_WAIT_DOCKERD})
 export SOURCE="gold"

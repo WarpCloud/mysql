@@ -1,13 +1,20 @@
-/* Copyright (c) 2007, 2016, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2007, 2018, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software Foundation,
@@ -3554,6 +3561,32 @@ void MDL_lock::object_lock_notify_conflicting_locks(MDL_context *ctx, MDL_lock *
 bool
 MDL_context::acquire_lock(MDL_request *mdl_request, ulong lock_wait_timeout)
 {
+  if (lock_wait_timeout == 0)
+  {
+    /*
+      Resort to try_acquire_lock() in case of zero timeout.
+
+      This allows to avoid unnecessary deadlock detection attempt and "fake"
+      deadlocks which might result from it.
+      In case of failure to acquire lock, try_acquire_lock() preserves
+      invariants by updating MDL_lock::fast_path_state and obtrusive locks
+      count. It also performs SE notification if needed.
+    */
+    if (try_acquire_lock(mdl_request))
+      return true;
+
+    if (!mdl_request->ticket)
+    {
+      /* We have failed to acquire lock instantly. */
+      DEBUG_SYNC(get_thd(), "mdl_acquire_lock_wait");
+      my_error(ER_LOCK_WAIT_TIMEOUT, MYF(0));
+      return true;
+    }
+    return false;
+  }
+
+  /* Normal, non-zero timeout case. */
+
   MDL_lock *lock;
   MDL_ticket *ticket;
   struct timespec abs_timeout;

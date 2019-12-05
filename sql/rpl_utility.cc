@@ -1,13 +1,20 @@
 /* Copyright (c) 2006, 2017, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -1057,7 +1064,8 @@ HASH_ROW_ENTRY* Hash_slave_rows::make_entry(const uchar* bi_start, const uchar* 
   HASH_ROW_POS *pos= (HASH_ROW_POS *) my_malloc(key_memory_HASH_ROW_ENTRY,
                                                 sizeof(HASH_ROW_POS), MYF(0));
 
-  if (!entry || !preamble || !pos)
+  if (!entry || !preamble || !pos ||
+      DBUG_EVALUATE_IF("fake_myalloc_failure",1, 0))
     goto err;
 
   /**
@@ -1086,7 +1094,7 @@ err:
   if (entry)
     my_free(entry);
   if (preamble)
-    my_free(entry);
+    my_free(preamble);
   if (pos)
     my_free(pos);
   DBUG_RETURN(NULL);
@@ -1262,7 +1270,9 @@ Hash_slave_rows::make_hash_key(TABLE *table, MY_BITMAP *cols)
     /*
       Field is set in the read_set and is isn't NULL.
      */
-    if (bitmap_is_set(cols, f->field_index) && !f->is_null())
+    if (bitmap_is_set(cols, f->field_index) &&
+        !f->is_virtual_gcol() && // Avoid virtual generated columns on hashes
+        !f->is_null())
     {
       /*
         BLOB and VARCHAR have pointers in their field, we must convert

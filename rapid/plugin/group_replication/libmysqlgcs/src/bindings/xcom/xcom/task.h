@@ -1,13 +1,20 @@
-/* Copyright (c) 2012, 2016, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2012, 2018, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -20,6 +27,7 @@
 #include "xcom_common.h"
 #include "x_platform.h"
 #include "task_arg.h"
+#include "simset.h"
 
 
 #ifdef __cplusplus
@@ -35,8 +43,6 @@ extern "C" {
    	and a stack of environment structs. (continuations?)
    	Nonblocking IO and event handling need to be rewritten for each new OS.
 */
-
-#define USE_SELECT
 
 #if 0
 void add_base_event(double when, char const *file, int state);
@@ -281,16 +287,17 @@ struct task_queue {
 };
 typedef struct task_queue task_queue;
 
-#define MAXFILES MAXTASKS
-
 #define _ep ((struct env*)(stack->sp->ptr))
 
 #define TASK_ALLOC(pool, type)                  \
   (task_allocate(pool, sizeof(type)))
 
 #if 0
-#define TASK_DEBUG(x)       \
-  if(stack->debug){DBGOUT(FN; STRLIT(x " task "); PTREXP((void*)stack);STRLIT(stack->name));}
+#define TASK_DEBUG(x)                                     \
+  if (stack->debug) {                                     \
+    DBGOUT(FN; STRLIT(x " task "); PTREXP((void *)stack); \
+           STRLIT(stack->name); NDBG(stack->sp->state,d));\
+  }
 #else
 #define TASK_DEBUG(x)
 #endif

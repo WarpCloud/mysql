@@ -1,14 +1,21 @@
 # -*- cperl -*-
-# Copyright (c) 2005, 2016, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2005, 2019, Oracle and/or its affiliates. All rights reserved.
 # 
 # This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; version 2 of the License.
+# it under the terms of the GNU General Public License, version 2.0,
+# as published by the Free Software Foundation.
+#
+# This program is also distributed with certain software (including
+# but not limited to OpenSSL) that is licensed under separate terms,
+# as designated in a particular file or component or in included license
+# documentation.  The authors of MySQL hereby grant you an additional
+# permission to link the program and your derivative works with the
+# separately licensed software that they have included with MySQL.
 #
 # This program is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+# GNU General Public License, version 2.0, for more details.
 #
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
@@ -143,7 +150,13 @@ sub collect_test_cases ($$$$) {
 
   if ( @$opt_cases )
   {
-    # A list of tests was specified on the command line
+    # A list of tests was specified on the command line.
+    # Among those, the tests which are not already collected will be
+    # collected and stored temporarily in an array of hashes pointed
+    # by the below reference. This array is eventually appeneded to
+    # the one having all collected test cases.
+    my $cmdline_cases;
+
     # Check that the tests specified was found
     # in at least one suite
     foreach my $test_name_spec ( @$opt_cases )
@@ -162,20 +175,56 @@ sub collect_test_cases ($$$$) {
       }
       if ( not $found )
       {
-	$sname= "main" if !$opt_reorder and !$sname;
-	mtr_error("Could not find '$tname' in '$suites' suite(s)") unless $sname;
-	# If suite was part of name, find it there, may come with combinations
-	my @this_case = collect_one_suite($sname, [ $tname ]);
-	if (@this_case)
+        if ( $sname )
         {
-	  push (@$cases, @this_case);
-	}
-	else
-	{
-	  mtr_error("Could not find '$tname' in '$sname' suite");
+	  # If suite was part of name, find it there, may come with combinations
+	  my @this_case = collect_one_suite($sname, [ $tname ]);
+
+          # If a test is specified multiple times on the command line, all
+          # instances of the test need to be picked. Hence, such tests are
+          # stored in the temporary array instead of adding them to $cases
+          # directly so that repeated tests are not run only once
+	  if (@this_case)
+          {
+	    push (@$cmdline_cases, @this_case);
+	  }
+	  else
+	  {
+	    mtr_error("Could not find '$tname' in '$sname' suite");
+          }
+        }
+        else
+        {
+          if ( !$opt_reorder )
+          {
+            # If --no-reorder is passed and if suite was not part of name,
+            # search in all the suites
+            foreach my $suite (split(",", $suites))
+            {
+              my @this_case = collect_one_suite($suite, [ $tname ]);
+              if ( @this_case )
+              {
+                push (@$cmdline_cases, @this_case);
+                $found= 1;
+              }
+              @this_case= collect_one_suite("i_".$suite, [ $tname ]);
+              if ( @this_case )
+              {
+                push (@$cmdline_cases, @this_case);
+                $found= 1;
+              }
+            }
+          }
+          if ( !$found )
+          {
+            mtr_error("Could not find '$tname' in '$suites' suite(s)");
+          }
         }
       }
     }
+    # Add test cases collected in the temporary array to the one
+    # containing all previously collected test cases
+    push (@$cases, @$cmdline_cases) if $cmdline_cases;
   }
 
   if ( $opt_reorder && !$quick_collect)
@@ -341,6 +390,17 @@ sub collect_one_suite($)
   my %disabled;
   my @disabled_collection= @{$opt_skip_test_list} if $opt_skip_test_list;
   unshift (@disabled_collection, "$testdir/disabled.def");
+
+  # Check for the tests to be skipped in a sanitizer which are listed
+  # in "mysql-test/collections/disabled-<sanitizer>.list" file.
+  if ($::opt_sanitize) {
+    # Check for disabled-asan.list
+    if ($::mysql_version_extra =~ /asan/i &&
+        !grep (/disabled-asan\.list$/, @{$opt_skip_test_list})) {
+      push(@disabled_collection, "collections/disabled-asan.list");
+    }
+  }
+
   for my $skip (@disabled_collection)
     {
       if ( open(DISABLED, $skip ) )

@@ -2,17 +2,23 @@
 #define PARTITION_HANDLER_INCLUDED
 
 /*
-   Copyright (c) 2005, 2015, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2005, 2019, Oracle and/or its affiliates. All rights reserved.
 
-   This program is free software; you can redistribute it and/or
-   modify it under the terms of the GNU General Public License
-   as published by the Free Software Foundation; version 2 of
-   the License.
+   This program is free software; you can redistribute it and/or modify
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-   GNU General Public License for more details.
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -322,6 +328,15 @@ public:
   virtual uint alter_flags(uint flags) const
   { return 0; }
 
+  /**
+    Get partition row type from SE
+    @param       part_id    Id of partition for which row type to be retrieved
+    @return      Partition row type.
+  */
+  virtual enum row_type get_partition_row_type(uint part_id) {
+    return ROW_TYPE_NOT_USED;
+  }
+
 private:
   /**
     Truncate partition.
@@ -558,7 +573,6 @@ public:
   int ph_rnd_next(uchar *buf);
   void ph_position(const uchar *record);
   int ph_rnd_pos(uchar *buf, uchar *pos);
-  int ph_rnd_pos_by_record(uchar *record);
 
   /** @} */
 
@@ -818,8 +832,6 @@ private:
 
   /** handler to use (ha_partition, ha_innopart etc.) */
   handler *m_handler;
-  /** Convenience pointer to table from m_handler (i.e. m_handler->table). */
-  TABLE *m_table;
 
   /*
     Access methods to protected areas in handler to avoid adding
@@ -903,13 +915,6 @@ private:
   /* If ph_rnd_pos is used then this needs to be implemented! */
   virtual int rnd_pos_in_part(uint part_id, uchar *buf, uchar *pos)
   { DBUG_ASSERT(0); return HA_ERR_WRONG_COMMAND; }
-  virtual int rnd_pos_by_record_in_last_part(uchar *row)
-  {
-    /*
-      Not much overhead to use default function. This avoids out-of-sync code.
-    */
-    return m_handler->rnd_pos_by_record(row);
-  }
   virtual int index_init_in_part(uint part, uint keynr, bool sorted)
   { DBUG_ASSERT(0); return HA_ERR_WRONG_COMMAND; }
   virtual int index_end_in_part(uint part)
@@ -1204,6 +1209,9 @@ private:
     but easier to expose them to derived classes to use.
   */
 protected:
+
+  /** Convenience pointer to table from m_handler (i.e. m_handler->table). */
+  TABLE *m_table;
   /** All internal partitioning data! @{ */
   /** Tables partitioning info (same as table->part_info) */
   partition_info *m_part_info;

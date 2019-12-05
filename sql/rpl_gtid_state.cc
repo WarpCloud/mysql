@@ -1,14 +1,20 @@
-/* Copyright (c) 2011, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2011, 2019, Oracle and/or its affiliates. All rights reserved.
 
-   This program is free software; you can redistribute it and/or
-   modify it under the terms of the GNU General Public License as
-   published by the Free Software Foundation; version 2 of the
-   License.
+   This program is free software; you can redistribute it and/or modify
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
 
-   This program is distributed in the hope that it will be useful, but
-   WITHOUT ANY WARRANTY; without even the implied warranty of
-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-   General Public License for more details.
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -20,6 +26,7 @@
 #include "rpl_gtid_persist.h"      // gtid_table_persistor
 #include "sql_class.h"             // THD
 #include "debug_sync.h"            // DEBUG_SYNC
+#include "binlog.h"
 
 PSI_memory_key key_memory_Gtid_state_group_commit_sidno;
 
@@ -288,8 +295,7 @@ bool Gtid_state::wait_for_sidno(THD *thd, rpl_sidno sidno,
   sid_locks.enter_cond(thd, sidno,
                        &stage_waiting_for_gtid_to_be_committed,
                        &old_stage);
-  bool ret= (thd->killed != THD::NOT_KILLED ||
-             sid_locks.wait(thd, sidno, abstime));
+  bool ret= sid_locks.wait(thd, sidno, abstime);
   // Can't call sid_locks.unlock() as that requires global_sid_lock.
   mysql_mutex_unlock(thd->current_mutex);
   thd->EXIT_COND(&old_stage);
@@ -301,10 +307,11 @@ bool Gtid_state::wait_for_gtid(THD *thd, const Gtid &gtid,
                                struct timespec *abstime)
 {
   DBUG_ENTER("Gtid_state::wait_for_gtid");
-  DBUG_PRINT("info", ("SIDNO=%d GNO=%lld owner(sidno,gno)=%u thread_id=%u",
+  DBUG_PRINT("info", ("SIDNO=%d GNO=%lld thread_id=%u",
                       gtid.sidno, gtid.gno,
-                      owned_gtids.get_owner(gtid), thd->thread_id()));
-  DBUG_ASSERT(owned_gtids.get_owner(gtid) != thd->thread_id());
+                      thd->thread_id()));
+  DBUG_ASSERT(!owned_gtids.is_owned_by(gtid, thd->thread_id()));
+  DBUG_ASSERT(!owned_gtids.is_owned_by(gtid, 0));
 
   bool ret= wait_for_sidno(thd, gtid.sidno, abstime);
   DBUG_RETURN(ret);
@@ -324,8 +331,10 @@ bool Gtid_state::wait_for_gtid_set(THD *thd, Gtid_set* wait_for,
 
   DBUG_ASSERT(wait_for->get_sid_map() == global_sid_map);
 
-  if (timeout > 0)
-    set_timespec_nsec(&abstime, (ulonglong) timeout * 1000000000ULL);
+  if (timeout > 0) {
+    set_timespec_nsec(&abstime,
+                      static_cast<ulonglong>(timeout * 1000000000ULL));
+  }
 
   /*
     Algorithm:
@@ -467,7 +476,7 @@ rpl_gno Gtid_state::get_automatic_gno(rpl_sidno sidno) const
            DBUG_EVALUATE_IF("simulate_gno_exhausted", false, true))
     {
       DBUG_PRINT("debug",("Checking availability of gno= %llu", next_candidate.gno));
-      if (owned_gtids.get_owner(next_candidate) == 0)
+      if (owned_gtids.is_owned_by(next_candidate, 0))
         DBUG_RETURN(next_candidate.gno);
       next_candidate.gno++;
     }
@@ -760,7 +769,8 @@ int Gtid_state::save_gtids_of_last_binlog_into_table(bool on_rotation)
   {
     logged_gtids_last_binlog.remove_gtid_set(&previous_gtids_logged);
     logged_gtids_last_binlog.remove_gtid_set(&gtids_only_in_table);
-    if (!logged_gtids_last_binlog.is_empty())
+    if (!logged_gtids_last_binlog.is_empty() ||
+        mysql_bin_log.is_rotating_caused_by_incident)
     {
       /* Prepare previous_gtids_logged for next binlog on binlog rotation */
       if (on_rotation)
@@ -793,10 +803,10 @@ int Gtid_state::compress(THD *thd)
 
 
 #ifdef MYSQL_SERVER
-bool Gtid_state::warn_or_err_on_modify_gtid_table(THD *thd, TABLE_LIST *table)
+int Gtid_state::warn_or_err_on_modify_gtid_table(THD *thd, TABLE_LIST *table)
 {
   DBUG_ENTER("Gtid_state::warn_or_err_on_modify_gtid_table");
-  bool ret=
+  int ret=
     gtid_table_persistor->warn_or_err_on_explicit_modification(thd, table);
   DBUG_RETURN(ret);
 }
@@ -910,11 +920,16 @@ void Gtid_state::update_gtids_impl_lock_sidnos(THD *first_thd)
 void Gtid_state::update_gtids_impl_own_gtid(THD *thd, bool is_commit)
 {
   assert_sidno_lock_owner(thd->owned_gtid.sidno);
-  DBUG_ASSERT(!executed_gtids.contains_gtid(thd->owned_gtid));
-  owned_gtids.remove_gtid(thd->owned_gtid);
+  /*
+    In Group Replication the GTID may additionally be owned by another
+    thread, and we won't remove that ownership (it will be rolled back later)
+  */
+  DBUG_ASSERT(owned_gtids.is_owned_by(thd->owned_gtid, thd->thread_id()));
+  owned_gtids.remove_gtid(thd->owned_gtid, thd->thread_id());
 
   if (is_commit)
   {
+    DBUG_ASSERT(!executed_gtids.contains_gtid(thd->owned_gtid));
     DBUG_EXECUTE_IF(
       "rpl_gtid_update_on_commit_simulate_out_of_memory",
       DBUG_SET("+d,rpl_gtid_get_free_interval_simulate_out_of_memory"););

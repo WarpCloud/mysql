@@ -1,14 +1,21 @@
-# Copyright (c) 2006, 2016, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2006, 2019, Oracle and/or its affiliates. All rights reserved.
 # 
 # This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; version 2 of the License.
-# 
+# it under the terms of the GNU General Public License, version 2.0,
+# as published by the Free Software Foundation.
+#
+# This program is also distributed with certain software (including
+# but not limited to OpenSSL) that is licensed under separate terms,
+# as designated in a particular file or component or in included license
+# documentation.  The authors of MySQL hereby grant you an additional
+# permission to link the program and your derivative works with the
+# separately licensed software that they have included with MySQL.
+#
 # This program is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-# 
+# GNU General Public License, version 2.0, for more details.
+#
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
@@ -20,8 +27,7 @@ INCLUDE_DIRECTORIES(
   ${CMAKE_SOURCE_DIR}/sql
   ${CMAKE_SOURCE_DIR}/strings
   ${SSL_INCLUDE_DIRS}
-  ${SSL_INTERNAL_INCLUDE_DIRS}
-  ${ZLIB_INCLUDE_DIR})
+  ${SSL_INTERNAL_INCLUDE_DIRS})
 ADD_DEFINITIONS(${SSL_DEFINES})
 
 SET(CLIENT_API_FUNCTIONS
@@ -178,16 +184,17 @@ SET(CLIENT_API_FUNCTIONS_UNDOCUMENTED
 )
 
 SET(CLIENT_SOURCES
-  get_password.c 
   libmysql.c
   errmsg.c
   ../sql-common/client.c 
   ../sql-common/my_time.c 
   ../sql-common/client_plugin.c 
   ../sql-common/client_authentication.cc
+  ../sql-common/get_password.c
   ../sql/net_serv.cc
   ../sql-common/pack.c 
   ../sql/auth/password.c
+  ../sql/auth/sha2_password_common.cc
 )
 
 IF (WIN32 AND OPENSSL_APPLINK_C)
@@ -218,7 +225,31 @@ ADD_CONVENIENCE_LIBRARY(clientlib ${CLIENT_SOURCES})
 DTRACE_INSTRUMENT(clientlib)
 ADD_DEPENDENCIES(clientlib GenError)
 
-SET(LIBS clientlib dbug strings vio mysys mysys_ssl ${ZLIB_LIBRARY} ${SSL_LIBRARIES} ${LIBDL})
+SET(LIBS_TO_MERGE
+  clientlib dbug strings vio mysys mysys_ssl
+  )
+SET(LIBS_TO_LINK ${LIBDL})
+
+IF(WITH_ZLIB STREQUAL "bundled")
+  LIST(APPEND LIBS_TO_MERGE ${ZLIB_LIBRARY})
+ELSE()
+  LIST(APPEND LIBS_TO_LINK ${ZLIB_LIBRARY})
+ENDIF()
+
+IF(WIN32)
+  OPTION(LINK_DYNAMIC_OPENSSL "On Windows link OpenSSL dynamically" OFF)
+ENDIF()
+IF(WITH_SSL STREQUAL "system" OR LINK_DYNAMIC_OPENSSL)
+  LIST(APPEND LIBS_TO_LINK ${SSL_LIBRARIES})
+  IF(WIN32)
+    LIST(APPEND LIBS_TO_LINK crypt32)
+  ENDIF()
+ELSE()
+  LIST(APPEND LIBS_TO_MERGE ${SSL_LIBRARIES})
+  IF(WIN32)
+    LIST(APPEND LIBS_TO_MERGE crypt32)
+  ENDIF()
+ENDIF()
 
 #
 # On Windows platform client library includes the client-side 
@@ -227,23 +258,31 @@ SET(LIBS clientlib dbug strings vio mysys mysys_ssl ${ZLIB_LIBRARY} ${SSL_LIBRAR
 IF(WIN32)
   ADD_DEFINITIONS(-DAUTHENTICATION_WIN)
   ADD_SUBDIRECTORY(authentication_win)
-  LIST(APPEND LIBS auth_win_client)
+  LIST(APPEND LIBS_TO_MERGE auth_win_client)
 ENDIF()
 
+# LDAP authentication SASL client plugin
+MESSAGE(STATUS "Creating LDAP authentication SASL client library.")
+ADD_SUBDIRECTORY(authentication_ldap)
+  
 # Merge several convenience libraries into one big mysqlclient
-MERGE_LIBRARIES(mysqlclient STATIC ${LIBS} COMPONENT Development)
+MERGE_CONVENIENCE_LIBRARIES(mysqlclient ${LIBS_TO_MERGE} COMPONENT Development)
+TARGET_LINK_LIBRARIES(mysqlclient ${LIBS_TO_LINK})
 
 # Visual Studio users need debug  static library for debug projects
 IF(MSVC)
- INSTALL_DEBUG_TARGET(mysqlclient DESTINATION ${INSTALL_LIBDIR}/debug)
- INSTALL_DEBUG_TARGET(clientlib DESTINATION ${INSTALL_LIBDIR}/debug)
-ENDIF()
+  INSTALL_DEBUG_TARGET(mysqlclient DESTINATION ${INSTALL_LIBDIR}/debug)
 
-MACRO(GET_TARGET_NAME target out_name)
-  GET_TARGET_PROPERTY(location ${target} LOCATION)
-  GET_FILENAME_COMPONENT(name ${location} NAME)
-  SET(${out_name} ${name})
-ENDMACRO()
+  INSTALL_DEBUG_TARGET(auth_win_client DESTINATION ${INSTALL_LIBDIR}/debug)
+  INSTALL_DEBUG_TARGET(clientlib DESTINATION ${INSTALL_LIBDIR}/debug)
+  INSTALL_DEBUG_TARGET(mysys DESTINATION ${INSTALL_LIBDIR}/debug)
+  INSTALL_DEBUG_TARGET(mysys_ssl DESTINATION ${INSTALL_LIBDIR}/debug)
+  INSTALL_DEBUG_TARGET(strings DESTINATION ${INSTALL_LIBDIR}/debug)
+  INSTALL_DEBUG_TARGET(vio DESTINATION ${INSTALL_LIBDIR}/debug)
+  IF(WITH_ZLIB STREQUAL "bundled")
+    INSTALL_DEBUG_TARGET(zlib DESTINATION ${INSTALL_LIBDIR}/debug)
+  ENDIF()
+ENDIF()
 
 IF(UNIX)
   MACRO(GET_VERSIONED_LIBNAME LIBNAME EXTENSION VERSION OUTNAME)
@@ -259,7 +298,7 @@ IF(UNIX)
   ENDMACRO()
 ENDIF()
 
-# In our special "mixed" builds, also install libstlport which will
+# I we build client-only, we may be using libstlport which will
 # be injected into the build tree by the Sun Studio part of the build.
 
 IF(CMAKE_SYSTEM_NAME MATCHES "SunOS" AND DEFINED ENV{PB2WORKDIR})
@@ -271,9 +310,10 @@ ENDIF()
 IF(NOT DISABLE_SHARED)
   # Merge several convenience libraries into one big mysqlclient
   # and link them together into shared library.
-  MERGE_LIBRARIES(libmysql SHARED ${LIBS}
+  MERGE_LIBRARIES_SHARED(libmysql ${LIBS_TO_MERGE}
     EXPORTS ${CLIENT_API_FUNCTIONS} ${CLIENT_API_FUNCTIONS_UNDOCUMENTED}
     COMPONENT SharedLibraries)
+  TARGET_LINK_LIBRARIES(libmysql ${LIBS_TO_LINK})
   IF(UNIX)
     # libtool compatability
     IF(CMAKE_SYSTEM_NAME MATCHES "FreeBSD" OR APPLE)
@@ -296,7 +336,7 @@ IF(NOT DISABLE_SHARED)
     ENDIF()
 
     GET_TARGET_PROPERTY(libmysql_link_flags libmysql LINK_FLAGS)
-    IF(NOT libmysql_link_flag)
+    IF(NOT libmysql_link_flags)
       SET(libmysql_link_flags)
     ENDIF()
     SET(libmysql_link_flags
@@ -351,7 +391,13 @@ IF(LIBRT)
 ENDIF()
 
 IF(DISABLE_SHARED)
-  TARGET_LINK_LIBRARIES(libmysql_api_test ${LIBS})
+  TARGET_LINK_LIBRARIES(libmysql_api_test ${LIBS_TO_MERGE})
 ELSE()
   TARGET_LINK_LIBRARIES(libmysql_api_test libmysql)
 ENDIF()
+
+# Verify that libmysql_api_test runs OK
+ADD_CUSTOM_COMMAND(TARGET libmysql_api_test POST_BUILD
+  COMMAND $<TARGET_FILE:libmysql_api_test>
+  > ${CMAKE_CURRENT_BINARY_DIR}/libmysql_api_test.out
+  )

@@ -1,13 +1,20 @@
-# Copyright (c) 2015, 2016, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
 #
 # This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; version 2 of the License.
+# it under the terms of the GNU General Public License, version 2.0,
+# as published by the Free Software Foundation.
+#
+# This program is also distributed with certain software (including
+# but not limited to OpenSSL) that is licensed under separate terms,
+# as designated in a particular file or component or in included license
+# documentation.  The authors of MySQL hereby grant you an additional
+# permission to link the program and your derivative works with the
+# separately licensed software that they have included with MySQL.
 #
 # This program is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+# GNU General Public License, version 2.0, for more details.
 #
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
@@ -16,6 +23,8 @@
 IF(NOT GMOCK_FOUND)
   RETURN()
 ENDIF()
+
+INCLUDE(${MYSQL_CMAKE_SCRIPT_DIR}/compile_flags.cmake)
 
 IF(SSL_DEFINES)
   ADD_DEFINITIONS(${SSL_DEFINES})
@@ -60,14 +69,19 @@ IF(HAVE_NO_IGNORED_QUALIFIERS)
   SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-ignored-qualifiers")
 ENDIF()
 
-
-ADD_DEFINITIONS(${GMOCK_CFLAGS} -DBOOST_ALL_NO_LIB -DBOOST_NO_AUTO_PTR -DUSE_MYSQLX_FULL_PROTO -DXPLUGIN_UNIT_TESTS)
+ADD_DEFINITIONS(
+  ${GMOCK_CFLAGS}
+  -DBOOST_ALL_NO_LIB
+  -DBOOST_NO_AUTO_PTR
+  -DUSE_MYSQLX_FULL_PROTO
+  -DXPLUGIN_UNIT_TESTS
+)
 
 INCLUDE_DIRECTORIES(SYSTEM
     ${BOOST_INCLUDE_DIR}
     ${PROTOBUF_INCLUDE_DIRS}
     ${SSL_INCLUDE_DIRS}
-    ${LIBEVENT_INCLUDE_DIR}
+    ${LIBEVENT_INCLUDE_DIRS}
     ${GMOCK_INCLUDE_DIRS}
     ${GTEST_INCLUDE_DIR}
     ${CMAKE_BINARY_DIR}/rapid/plugin/x/generated/protobuf
@@ -100,6 +114,11 @@ FILE(
   "${CMAKE_CURRENT_SOURCE_DIR}/mysqlx_pb_wrapper.cc"
   "${PROJECT_SOURCE_DIR}/rapid/plugin/x/src/mysql_function_names.cc"
   "${PROJECT_SOURCE_DIR}/rapid/plugin/x/mysqlxtest_src/mysqlx_row.cc"
+  "${PROJECT_SOURCE_DIR}/rapid/plugin/x/mysqlxtest_src/mysqlx_protocol.cc"
+  "${PROJECT_SOURCE_DIR}/rapid/plugin/x/mysqlxtest_src/mysqlx_connection.cc"
+  "${PROJECT_SOURCE_DIR}/rapid/plugin/x/mysqlxtest_src/mysqlx_resultset.cc"
+  "${PROJECT_SOURCE_DIR}/rapid/plugin/x/mysqlxtest_src/password_hasher.cc"
+  "${PROJECT_SOURCE_DIR}/rapid/plugin/x/mysqlxtest_src/mysql41_hash.cc"
 )
 
 # boost::shared_ptr depends on scoped_lock
@@ -139,8 +158,9 @@ TARGET_LINK_LIBRARIES(
   regex
   gmock
   mysqlservices
+  ${FORCE_SSL_SOLARIS}
   mysqlclient
-  ${LIBEVENT_LIBRARY} ${LIBEVENT_LIBRARIES}
+  ${LIBEVENT_LIBRARIES}
   ${CMAKE_THREAD_LIBS_INIT}
   ${PROTOBUF_LIBRARY}
   ${GCOV_LDFLAGS}

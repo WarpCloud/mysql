@@ -138,7 +138,7 @@ SHOW STATUS LIKE 'locked_connects';
 Variable_name	Value
 Locked_connects	2
 FLUSH STATUS;
-SELECT * FROM INFORMATION_SCHEMA.user_privileges WHERE GRANTEE LIKE '%user%';
+SELECT * FROM INFORMATION_SCHEMA.user_privileges WHERE GRANTEE LIKE '%user%' AND GRANTEE NOT IN ("'mysql.session'@'localhost'");
 GRANTEE	TABLE_CATALOG	PRIVILEGE_TYPE	IS_GRANTABLE
 'user2'@'localhost'	def	CREATE USER	NO
 'user8'@'localhost'	def	USAGE	NO
@@ -266,7 +266,7 @@ SELECT USER();
 USER()
 u4@localhost
 
-CREATE USER user4@localhost IDENTIFIED WITH 'sha256_password' AS 'auth_string'
+CREATE USER user4@localhost IDENTIFIED WITH 'sha256_password' BY 'auth_string'
 ACCOUNT LOCK PASSWORD EXPIRE DEFAULT ACCOUNT UNLOCK PASSWORD EXPIRE INTERVAL 90 DAY;
 SELECT user,plugin,authentication_string,password_expired,
 password_lifetime,account_locked FROM mysql.user WHERE USER='user4';

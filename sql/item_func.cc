@@ -1,13 +1,20 @@
-/* Copyright (c) 2000, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2000, 2018, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -477,6 +484,22 @@ void Item_func::update_used_tables()
     with_subselect|= args[i]->has_subquery();
     with_stored_program|= args[i]->has_stored_program();
   }
+}
+
+
+void Item_func_sp::fix_after_pullout(SELECT_LEX *parent_select,
+                                     SELECT_LEX *removed_select)
+{
+  Item_func::fix_after_pullout(parent_select, removed_select);
+
+  /*
+    Prevents function from being evaluated before it is locked.
+    @todo - make this dependent on READS SQL or MODIFIES SQL.
+            Due to a limitation in how functions are evaluated, we need to
+            ensure that we are in a prelocked mode even though the function
+            doesn't reference any tables.
+  */
+  used_tables_cache|= PARAM_TABLE_BIT;
 }
 
 
@@ -2364,6 +2387,7 @@ my_decimal *Item_func_mod::decimal_op(my_decimal *decimal_value)
     return decimal_value;
   case E_DEC_DIV_ZERO:
     signal_divide_by_null();
+    // Fall through.
   default:
     null_value= 1;
     return 0;
@@ -2566,6 +2590,7 @@ Item_func_latlongfromgeohash::check_geohash_argument_valid_type(Item *item)
   {
   case MYSQL_TYPE_VARCHAR:
   case MYSQL_TYPE_VAR_STRING:
+  case MYSQL_TYPE_STRING:
   case MYSQL_TYPE_BLOB:
   case MYSQL_TYPE_TINY_BLOB:
   case MYSQL_TYPE_MEDIUM_BLOB:
@@ -6403,6 +6428,7 @@ String *user_var_entry::val_str(my_bool *null_value, String *str,
   case STRING_RESULT:
     if (str->copy(m_ptr, m_length, collation.collation))
       str= 0;					// EOM error
+    break;
   case ROW_RESULT:
     DBUG_ASSERT(1);				// Impossible
     break;
@@ -8348,16 +8374,11 @@ bool Item_func_sp::itemize(Parse_context *pc, Item **res)
   context= lex->current_context();
   lex->safe_to_cache_query= false;
 
-  if (m_name->m_db.str == NULL) // use the default database name
+  if (m_name->m_db.str == NULL)
   {
     /* Cannot match the function since no database is selected */
-    if (thd->db().str == NULL)
-    {
-      my_error(ER_NO_DB_ERROR, MYF(0));
-      return true;
-    }
-    m_name->m_db= thd->db();
-    m_name->m_db.str= thd->strmake(m_name->m_db.str, m_name->m_db.length);
+    my_error(ER_NO_DB_ERROR, MYF(0));
+    return true;
   }
 
   m_name->init_qname(thd);
@@ -8818,8 +8839,6 @@ Item_func_sp::fix_fields(THD *thd, Item **ref)
 
   /* These is reset/set by Item_func::fix_fields. */
   with_stored_program= true;
-  if (!m_sp->m_chistics->detistic || !tables_locked_cache)
-    const_item_cache= false;
 
   if (res)
     DBUG_RETURN(res);
@@ -8856,9 +8875,6 @@ Item_func_sp::fix_fields(THD *thd, Item **ref)
 void Item_func_sp::update_used_tables()
 {
   Item_func::update_used_tables();
-
-  if (!m_sp->m_chistics->detistic)
-    const_item_cache= false;
 
   /* This is reset by Item_func::update_used_tables(). */
   with_stored_program= true;

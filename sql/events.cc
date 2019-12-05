@@ -1,14 +1,21 @@
 /*
-   Copyright (c) 2005, 2015, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2005, 2017, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -32,6 +39,7 @@
 #include "lock.h"   // lock_object_name
 #include "log.h"
 #include "mysql/psi/mysql_sp.h"
+#include "debug_sync.h"
 
 /**
   @addtogroup Event_Scheduler
@@ -241,6 +249,8 @@ common_1_lev_code:
     break;
   case INTERVAL_WEEK:
     expr/= 7;
+    close_quote= FALSE;
+    break;
   default:
     close_quote= FALSE;
     break;
@@ -511,6 +521,8 @@ Events::update_event(THD *thd, Event_parse_data *parse_data,
     LEX_STRING dbname= new_dbname ? *new_dbname : parse_data->dbname;
     LEX_STRING name= new_name ? *new_name : parse_data->name;
 
+    DEBUG_SYNC(thd, "after_alter_event_updated_event_table");
+
     if (opt_event_scheduler != Events::EVENTS_DISABLED)
     {
       if (!(new_element= new Event_queue_element()))
@@ -529,16 +541,17 @@ Events::update_event(THD *thd, Event_parse_data *parse_data,
         if (event_queue)
           event_queue->update_event(thd, parse_data->dbname, parse_data->name,
                                     new_element);
-        /* Binlog the alter event. */
-        DBUG_ASSERT(thd->query().str && thd->query().length);
-
-        thd->add_to_binlog_accessed_dbs(parse_data->dbname.str);
-        if (new_dbname)
-          thd->add_to_binlog_accessed_dbs(new_dbname->str);
-
-        ret= write_bin_log(thd, true, thd->query().str, thd->query().length);
       }
     }
+
+    /* Binlog the alter event. */
+    DBUG_ASSERT(thd->query().str && thd->query().length);
+
+    thd->add_to_binlog_accessed_dbs(parse_data->dbname.str);
+    if (new_dbname)
+      thd->add_to_binlog_accessed_dbs(new_dbname->str);
+
+    ret|= write_bin_log(thd, true, thd->query().str, thd->query().length);
   }
   /* Restore the state of binlog format */
   DBUG_ASSERT(!thd->is_current_stmt_binlog_format_row());

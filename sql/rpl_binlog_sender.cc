@@ -1,13 +1,20 @@
-/* Copyright (c) 2013, 2016, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2013, 2017, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software Foundation,
@@ -196,7 +203,7 @@ void Binlog_sender::run()
   IO_CACHE log_cache;
   my_off_t start_pos= m_start_pos;
   const char *log_file= m_linfo.log_file_name;
-
+  bool is_index_file_reopened_on_binlog_disable= false;
   init();
 
   while (!has_error() && !m_thd->killed)
@@ -230,9 +237,40 @@ void Binlog_sender::run()
 
     THD_STAGE_INFO(m_thd,
                    stage_finished_reading_one_binlog_switching_to_next_binlog);
-    int error= mysql_bin_log.find_next_log(&m_linfo, 1);
+    DBUG_EXECUTE_IF("waiting_for_disable_binlog",
+		    {
+		    const char act[]= "now "
+		    "signal dump_thread_reached_wait_point "
+		    "wait_for continue_dump_thread no_clear_event";
+		    DBUG_ASSERT(!debug_sync_set_action(current_thd,
+						       STRING_WITH_LEN(act)));
+		    };);
+    mysql_bin_log.lock_index();
+    if (!mysql_bin_log.is_open())
+    {
+      if (mysql_bin_log.open_index_file(mysql_bin_log.get_index_fname(),
+					log_file, FALSE))
+      {
+        set_fatal_error("Binary log is not open and failed to open index file "
+                        "to retrieve next file.");
+        mysql_bin_log.unlock_index();
+        break;
+      }
+      is_index_file_reopened_on_binlog_disable= true;
+    }
+    int error= mysql_bin_log.find_next_log(&m_linfo, 0);
+    mysql_bin_log.unlock_index();
     if (unlikely(error))
     {
+      DBUG_EXECUTE_IF("waiting_for_disable_binlog",
+		      {
+		      const char act[]= "now signal consumed_binlog";
+		      DBUG_ASSERT(!debug_sync_set_action(current_thd,
+							 STRING_WITH_LEN(act)));
+		      };);
+      if (is_index_file_reopened_on_binlog_disable)
+        mysql_bin_log.close(LOG_CLOSE_INDEX, true/*need_lock_log=true*/,
+                            true/*need_lock_index=true*/);
       set_fatal_error("could not find next log");
       break;
     }

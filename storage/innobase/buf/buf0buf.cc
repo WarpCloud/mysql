@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 1995, 2017, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1995, 2019, Oracle and/or its affiliates. All Rights Reserved.
 Copyright (c) 2008, Google Inc.
 
 Portions of this file contain modifications contributed and copyrighted by
@@ -9,13 +9,21 @@ briefly in the InnoDB documentation. The contributions by Google are
 incorporated with their permission, and subject to the conditions contained in
 the file COPYING.Google.
 
-This program is free software; you can redistribute it and/or modify it under
-the terms of the GNU General Public License as published by the Free Software
-Foundation; version 2 of the License.
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License, version 2.0,
+as published by the Free Software Foundation.
 
-This program is distributed in the hope that it will be useful, but WITHOUT
-ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
-FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+This program is also distributed with certain software (including
+but not limited to OpenSSL) that is licensed under separate terms,
+as designated in a particular file or component or in included license
+documentation.  The authors of MySQL hereby grant you an additional
+permission to link the program and your derivative works with the
+separately licensed software that they have included with MySQL.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License, version 2.0, for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
@@ -1817,7 +1825,7 @@ buf_pool_init_instance(
 
 		buf_pool->zip_hash = hash_create(2 * buf_pool->curr_size);
 
-		buf_pool->last_printout_time = ut_time();
+		buf_pool->last_printout_time = ut_time_monotonic();
 	}
 	/* 2. Initialize flushing fields
 	-------------------------------- */
@@ -2024,7 +2032,7 @@ buf_page_realloc(
 		mutex_enter(&new_block->mutex);
 
 		memcpy(new_block->frame, block->frame, UNIV_PAGE_SIZE);
-		memcpy(&new_block->page, &block->page, sizeof block->page);
+		new (&new_block->page) buf_page_t(block->page);
 
 		/* relocate LRU list */
 		ut_ad(block->page.in_LRU_list);
@@ -2803,6 +2811,9 @@ withdraw_retry:
 					= buf_pool->n_chunks;
 				warning = true;
 				buf_pool->chunks_old = NULL;
+				for (ulint j = 0; j < buf_pool->n_chunks_new; j++) {
+					buf_pool_register_chunk(&(buf_pool->chunks[j]));
+				}
 				goto calc_buf_pool_size;
 			}
 
@@ -3131,7 +3142,7 @@ buf_relocate(
 	}
 #endif /* UNIV_DEBUG */
 
-	memcpy(dpage, bpage, sizeof *dpage);
+	new (dpage) buf_page_t(*bpage);
 
 	/* Important that we adjust the hazard pointer before
 	removing bpage from LRU list. */
@@ -6883,7 +6894,7 @@ buf_refresh_io_stats(
 /*=================*/
 	buf_pool_t*	buf_pool)	/*!< in: buffer pool instance */
 {
-	buf_pool->last_printout_time = ut_time();
+	buf_pool->last_printout_time = ut_time_monotonic();
 	buf_pool->old_stat = buf_pool->stat;
 }
 

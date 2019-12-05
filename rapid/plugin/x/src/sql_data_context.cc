@@ -1,15 +1,21 @@
 /*
- * Copyright (c) 2015, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; version 2 of the
- * License.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License, version 2.0,
+ * as published by the Free Software Foundation.
+ *
+ * This program is also distributed with certain software (including
+ * but not limited to OpenSSL) that is licensed under separate terms,
+ * as designated in a particular file or component or in included license
+ * documentation.  The authors of MySQL hereby grant you an additional
+ * permission to link the program and your derivative works with the
+ * separately licensed software that they have included with MySQL.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License, version 2.0, for more details.
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
@@ -106,9 +112,8 @@ bool Sql_data_context::kill()
 
       if (thd_get_security_context(srv_session_info_get_thd(session), &scontext))
         log_warning("Could not get security context for session");
-      else
-      {
-        const char *user = MYSQLXSYS_USER;
+      else {
+        const char *user = MYSQL_SESSION_USER;
         const char *host = MYSQLXSYS_HOST;
         if (security_context_lookup(scontext, user, host, NULL, NULL))
           log_warning("Unable to switch security context to root");
@@ -207,12 +212,11 @@ ngs::Error_code Sql_data_context::authenticate(const char *user, const char *hos
   std::string authenticated_user_name = get_authenticated_user_name();
   std::string authenticated_user_host = get_authenticated_user_host();
 
-  error = switch_to_user(MYSQLXSYS_USER, MYSQLXSYS_HOST, NULL, NULL);
+  error = switch_to_user(MYSQL_SESSION_USER, MYSQLXSYS_HOST, NULL, NULL);
 
-  if (error)
-  {
-    log_error("Unable to switch context to user %s", MYSQLXSYS_USER);
-    throw error;
+  if (error) {
+    log_error("Unable to switch context to user %s", MYSQL_SESSION_USER);
+    return error;
   }
 
   if (!is_acl_disabled())
@@ -252,6 +256,7 @@ ngs::Error_code Sql_data_context::authenticate(const char *user, const char *hos
       data.com_init_db.length = static_cast<unsigned long>(strlen(db));
 
       m_callback_delegate.reset();
+
       if (command_service_run_command(m_mysql_session, COM_INIT_DB, &data, mysqld::get_charset_utf8mb4_general_ci(),
                                       m_callback_delegate.callbacks(), m_callback_delegate.representation(), &m_callback_delegate))
         return ngs::Error_code(ER_NO_DB_ERROR, "Could not set database");
@@ -267,7 +272,7 @@ ngs::Error_code Sql_data_context::authenticate(const char *user, const char *hos
         host_or_ip.c_str(), host_or_ip.length());
 #endif // HAVE_PSI_THREAD_INTERFACE
 
-    return ngs::Error_code();
+    return error;
   }
 
   log_error("Unable to switch context to user %s", user);

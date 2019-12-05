@@ -1,13 +1,20 @@
 # Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
 # 
 # This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; version 2 of the License.
+# it under the terms of the GNU General Public License, version 2.0,
+# as published by the Free Software Foundation.
+#
+# This program is also distributed with certain software (including
+# but not limited to OpenSSL) that is licensed under separate terms,
+# as designated in a particular file or component or in included license
+# documentation.  The authors of MySQL hereby grant you an additional
+# permission to link the program and your derivative works with the
+# separately licensed software that they have included with MySQL.
 #
 # This program is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+# GNU General Public License, version 2.0, for more details.
 #
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
@@ -26,7 +33,8 @@ Description: Management server
 
 Package: mysql-${DEB_PRODUCTNAME}-data-node
 Architecture: any
-Depends: \${shlibs:Depends}, \${misc:Depends}
+Depends: \${shlibs:Depends}, \${misc:Depends},
+ libclass-methodmaker-perl
 Description: Data node
  This package contains MySQL Cluster Data Node Daemon, it's the process
  that is used to handle all the data in tables using the NDB Cluster
@@ -35,7 +43,8 @@ Description: Data node
 
 Package: mysql-${DEB_PRODUCTNAME}-auto-installer
 Architecture: any
-Depends: \${shlibs:Depends}, \${misc:Depends}
+Depends: \${shlibs:Depends}, \${misc:Depends},
+ python-paramiko
 Description: Data node
  This package contains MySQL Cluster Data Node Daemon, it's the process
  that is used to handle all the data in tables using the NDB Cluster
@@ -129,7 +138,7 @@ Description: memcached
 /usr/share/man/man1/ndb_show_tables.1*
 /usr/share/man/man1/ndb_size.pl.1*
 /usr/share/man/man1/ndb_waiter.1*
-/usr/share/man/man1/ndbd_redo_log_reader.1*
+/usr/share/man/man1/ndb_redo_log_reader.1*
 /usr/share/man/man1/ndbinfo_select_all.1*
 ")
 
@@ -156,11 +165,11 @@ Description: memcached
 ")
   SET (DEB_NDB_RULES_DOCDIRS
 "
-	install -g root -o root -m 0755 -d debian/tmp/usr/share/doc/mysql-@DEB_PRODUCTNAME@-auto-installer
-	install -g root -o root -m 0755 -d debian/tmp/usr/share/doc/mysql-@DEB_PRODUCTNAME@-data-node
-	install -g root -o root -m 0755 -d debian/tmp/usr/share/doc/mysql-@DEB_PRODUCTNAME@-java
-	install -g root -o root -m 0755 -d debian/tmp/usr/share/doc/mysql-@DEB_PRODUCTNAME@-management-server
-	install -g root -o root -m 0755 -d debian/tmp/usr/share/doc/mysql-@DEB_PRODUCTNAME@-memcached
+	install -g root -o root -m 0755 -d debian/tmp/usr/share/doc/mysql-${DEB_PRODUCTNAME}-auto-installer
+	install -g root -o root -m 0755 -d debian/tmp/usr/share/doc/mysql-${DEB_PRODUCTNAME}-data-node
+	install -g root -o root -m 0755 -d debian/tmp/usr/share/doc/mysql-${DEB_PRODUCTNAME}-java
+	install -g root -o root -m 0755 -d debian/tmp/usr/share/doc/mysql-${DEB_PRODUCTNAME}-management-server
+	install -g root -o root -m 0755 -d debian/tmp/usr/share/doc/mysql-${DEB_PRODUCTNAME}-memcached
 	install -g root -o root -m 0755 -d debian/tmp/usr/share/doc/ndbclient
 	install -g root -o root -m 0755 -d debian/tmp/usr/share/doc/ndbclient-dev
 ")

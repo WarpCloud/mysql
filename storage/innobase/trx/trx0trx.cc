@@ -1,14 +1,22 @@
 /*****************************************************************************
 
-Copyright (c) 1996, 2016, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1996, 2018, Oracle and/or its affiliates. All Rights Reserved.
 
-This program is free software; you can redistribute it and/or modify it under
-the terms of the GNU General Public License as published by the Free Software
-Foundation; version 2 of the License.
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License, version 2.0,
+as published by the Free Software Foundation.
 
-This program is distributed in the hope that it will be useful, but WITHOUT
-ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
-FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+This program is also distributed with certain software (including
+but not limited to OpenSSL) that is licensed under separate terms,
+as designated in a particular file or component or in included license
+documentation.  The authors of MySQL hereby grant you an additional
+permission to link the program and your derivative works with the
+separately licensed software that they have included with MySQL.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License, version 2.0, for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
@@ -127,6 +135,8 @@ trx_init(
 
 	trx->no = TRX_ID_MAX;
 
+	trx->skip_lock_inheritance = false;
+
 	trx->is_recovered = false;
 
 	trx->op_info = "";
@@ -182,6 +192,7 @@ trx_init(
 	trx->lock.rec_cached = 0;
 
 	trx->lock.table_cached = 0;
+	trx->error_index = NULL;
 
 	/* During asynchronous rollback, we should reset forced rollback flag
 	only after rollback is complete to avoid race with the thread owning
@@ -1295,7 +1306,9 @@ trx_assign_rseg(
 	ut_a(!trx_is_autocommit_non_locking(trx));
 
 	trx->rsegs.m_noredo.rseg = trx_assign_rseg_low(
-		srv_undo_logs, srv_undo_tablespaces, TRX_RSEG_TYPE_NOREDO);
+		srv_rollback_segments,
+		srv_undo_tablespaces,
+		TRX_RSEG_TYPE_NOREDO);
 
 	if (trx->id == 0) {
 		mutex_enter(&trx_sys->mutex);
@@ -1390,7 +1403,8 @@ trx_start_low(
 	    && (trx->mysql_thd == 0 || read_write || trx->ddl)) {
 
 		trx->rsegs.m_redo.rseg = trx_assign_rseg_low(
-			srv_undo_logs, srv_undo_tablespaces,
+			srv_rollback_segments,
+			srv_undo_tablespaces,
 			TRX_RSEG_TYPE_REDO);
 
 		/* Temporary rseg is assigned only if the transaction
@@ -2831,6 +2845,22 @@ trx_prepare(
 	trx_sys_mutex_exit();
 	/*--------------------------------------*/
 
+	/* Force isolation level to RC and release GAP locks
+	for test purpose. */
+	DBUG_EXECUTE_IF("ib_force_release_gap_lock_prepare",
+			trx->isolation_level = TRX_ISO_READ_COMMITTED;);
+
+	/* Release read locks after PREPARE for READ COMMITTED
+	and lower isolation. */
+	if (trx->isolation_level <= TRX_ISO_READ_COMMITTED) {
+
+		/* Stop inheriting GAP locks. */
+		trx->skip_lock_inheritance = true;
+
+		/* Release only GAP locks for now. */
+		lock_trx_release_read_locks(trx, true);
+	}
+
 	switch (thd_requested_durability(trx->mysql_thd)) {
 	case HA_IGNORE_DURABILITY:
 		/* We set the HA_IGNORE_DURABILITY during prepare phase of
@@ -3180,6 +3210,7 @@ trx_set_rw_mode(
 	ut_ad(trx->rsegs.m_redo.rseg == 0);
 	ut_ad(!trx->in_rw_trx_list);
 	ut_ad(!trx_is_autocommit_non_locking(trx));
+	ut_ad(!trx->read_only);
 
 	if (srv_force_recovery >= SRV_FORCE_NO_TRX_UNDO) {
 		return;
@@ -3193,7 +3224,9 @@ trx_set_rw_mode(
 	based on in-consistent view formed during promotion. */
 
 	trx->rsegs.m_redo.rseg = trx_assign_rseg_low(
-		srv_undo_logs, srv_undo_tablespaces, TRX_RSEG_TYPE_REDO);
+		srv_rollback_segments,
+		srv_undo_tablespaces,
+		TRX_RSEG_TYPE_REDO);
 
 	ut_ad(trx->rsegs.m_redo.rseg != 0);
 
@@ -3217,11 +3250,9 @@ trx_set_rw_mode(
 	}
 #endif /* UNIV_DEBUG */
 
-	if (!trx->read_only) {
-		UT_LIST_ADD_FIRST(trx_sys->rw_trx_list, trx);
+	UT_LIST_ADD_FIRST(trx_sys->rw_trx_list, trx);
 
-		ut_d(trx->in_rw_trx_list = true);
-	}
+	ut_d(trx->in_rw_trx_list = true);
 
 	mutex_exit(&trx_sys->mutex);
 }

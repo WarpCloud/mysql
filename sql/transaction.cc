@@ -1,13 +1,20 @@
-/* Copyright (c) 2000, 2016, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2000, 2018, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software Foundation,
@@ -307,7 +314,7 @@ bool trans_commit_implicit(THD *thd)
     res= MY_TEST(ha_commit_trans(thd, TRUE));
   }
   else if (tc_log)
-    tc_log->commit(thd, true);
+    res= tc_log->commit(thd, true);
 
   if (res == FALSE)
     if (thd->rpl_thd_ctx.session_gtids_ctx().
@@ -460,7 +467,7 @@ bool trans_commit_stmt(THD *thd)
       trans_reset_one_shot_chistics(thd);
   }
   else if (tc_log)
-    tc_log->commit(thd, false);
+    res= tc_log->commit(thd, false);
   if (res == FALSE && !thd->in_active_multi_stmt_transaction())
     if (thd->rpl_thd_ctx.session_gtids_ctx().
         notify_after_transaction_commit(thd))
@@ -625,15 +632,6 @@ bool trans_savepoint(THD *thd, LEX_STRING name)
       !opt_using_transactions)
     DBUG_RETURN(FALSE);
 
-  if (thd->variables.transaction_write_set_extraction != HASH_ALGORITHM_OFF)
-  {
-    // is_fatal_errror is needed to avoid stored procedures to skip the error.
-    thd->is_fatal_error= 1;
-    my_error(ER_OPTION_PREVENTS_STATEMENT, MYF(0),
-             "--transaction-write-set-extraction!=OFF");
-    DBUG_RETURN(true);
-  }
-
   if (thd->get_transaction()->xid_state()->check_has_uncommitted_xa())
     DBUG_RETURN(true);
 
@@ -676,6 +674,12 @@ bool trans_savepoint(THD *thd, LEX_STRING name)
     locks acquired during LOCK TABLES.
   */
   newsv->mdl_savepoint= thd->mdl_context.mdl_savepoint();
+
+  if (thd->is_current_stmt_binlog_row_enabled_with_write_set_extraction())
+  {
+    thd->get_transaction()->get_transaction_write_set_ctx()
+        ->add_savepoint(name.str);
+  }
 
   DBUG_RETURN(FALSE);
 }
@@ -751,6 +755,12 @@ bool trans_rollback_to_savepoint(THD *thd, LEX_STRING name)
   if (!res && mdl_can_safely_rollback_to_savepoint)
     thd->mdl_context.rollback_to_savepoint(sv->mdl_savepoint);
 
+  if (thd->is_current_stmt_binlog_row_enabled_with_write_set_extraction())
+  {
+    thd->get_transaction()->get_transaction_write_set_ctx()
+        ->rollback_to_savepoint(name.str);
+  }
+
   DBUG_RETURN(MY_TEST(res));
 }
 
@@ -788,6 +798,12 @@ bool trans_release_savepoint(THD *thd, LEX_STRING name)
     res= TRUE;
 
   thd->get_transaction()->m_savepoints= sv->prev;
+
+  if (thd->is_current_stmt_binlog_row_enabled_with_write_set_extraction())
+  {
+    thd->get_transaction()->get_transaction_write_set_ctx()
+        ->del_savepoint(name.str);
+  }
 
   DBUG_RETURN(MY_TEST(res));
 }

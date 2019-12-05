@@ -1,14 +1,22 @@
 /*****************************************************************************
 
-Copyright (c) 2008, 2016, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2008, 2019, Oracle and/or its affiliates. All Rights Reserved.
 
-This program is free software; you can redistribute it and/or modify it under
-the terms of the GNU General Public License as published by the Free Software
-Foundation; version 2 of the License.
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License, version 2.0,
+as published by the Free Software Foundation.
 
-This program is distributed in the hope that it will be useful, but WITHOUT
-ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
-FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+This program is also distributed with certain software (including
+but not limited to OpenSSL) that is licensed under separate terms,
+as designated in a particular file or component or in included license
+documentation.  The authors of MySQL hereby grant you an additional
+permission to link the program and your derivative works with the
+separately licensed software that they have included with MySQL.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License, version 2.0, for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
@@ -390,6 +398,17 @@ ib_read_tuple(
 				tuple->heap);
 
 			ut_a(len != UNIV_SQL_NULL);
+			/* Reset the data length if it fails to copy
+			externally stored column */
+			if (data == NULL) {
+				/* data == NULL means that the externally
+				stored field was not written yet.
+				This record should only be seen by
+				TRX_ISO_READ_UNCOMMITTED transactions. */
+				ut_ad(ib_cfg_trx_level() ==
+					IB_TRX_READ_UNCOMMITTED);
+				len = 0;
+			}
 		}
 
 		dfield_set_data(dfield, data, len);
@@ -1838,9 +1857,11 @@ ib_cursor_read_row(
 				dict_table_is_comp(tuple->index->table));
 			rec = btr_pcur_get_rec(pcur);
 
-			if (prebuilt->innodb_api_rec &&
-			    prebuilt->innodb_api_rec != rec) {
-				rec = prebuilt->innodb_api_rec;
+			if (!rec_get_deleted_flag(rec, page_format)) {
+				if (prebuilt->innodb_api &&
+					prebuilt->innodb_api_rec != NULL) {
+					rec =prebuilt->innodb_api_rec;
+				}
 			}
 
 			if (!rec_get_deleted_flag(rec, page_format)) {
@@ -1877,6 +1898,9 @@ ib_cursor_position(
 
 	buf = static_cast<unsigned char*>(ut_malloc_nokey(UNIV_PAGE_SIZE));
 
+	if (prebuilt->innodb_api) {
+		prebuilt->cursor_heap = cursor->heap;
+	}
 	/* We want to position at one of the ends, row_search_for_mysql()
 	uses the search_tuple fields to work out what to do. */
 	dtuple_set_n_fields(prebuilt->search_tuple, 0);
@@ -1915,6 +1939,9 @@ ib_cursor_next(
         row_prebuilt_t* prebuilt = cursor->prebuilt;
 	byte		buf[UNIV_PAGE_SIZE_MAX];
 
+	if (prebuilt->innodb_api) {
+		prebuilt->cursor_heap = cursor->heap;
+	}
         /* We want to move to the next record */
         dtuple_set_n_fields(prebuilt->search_tuple, 0);
 
@@ -1965,6 +1992,10 @@ ib_cursor_moveto(
 	prebuilt->innodb_api_rec = NULL;
 
 	buf = static_cast<unsigned char*>(ut_malloc_nokey(UNIV_PAGE_SIZE));
+
+	if (prebuilt->innodb_api) {
+		prebuilt->cursor_heap = cursor->heap;
+	}
 
 	err = static_cast<ib_err_t>(row_search_for_mysql(
 		buf, static_cast<page_cur_mode_t>(ib_srch_mode), prebuilt,

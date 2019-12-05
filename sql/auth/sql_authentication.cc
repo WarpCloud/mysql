@@ -1,13 +1,20 @@
-/* Copyright (c) 2000, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2000, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -36,11 +43,12 @@
 #include <vector>                       /* std::vector */
 #include <stdint.h>
 
-#if defined(HAVE_OPENSSL) && !defined(HAVE_YASSL)
+#if defined(HAVE_OPENSSL)
 #include <openssl/rsa.h>
 #include <openssl/pem.h>
 #include <openssl/err.h>
-#endif /* HAVE OPENSSL && !HAVE_YASSL */
+#include <openssl/x509v3.h>
+#endif /* HAVE OPENSSL */
 
 #include "auth_internal.h"
 #include "sql_auth_cache.h"
@@ -80,7 +88,7 @@ my_bool disconnect_on_expired_password= TRUE;
 
 #if defined(HAVE_OPENSSL)
 #define MAX_CIPHER_LENGTH 1024
-#if !defined(HAVE_YASSL)
+#define SHA256_PASSWORD_MAX_PASSWORD_LENGTH MAX_PLAINTEXT_LENGTH
 #define AUTH_DEFAULT_RSA_PRIVATE_KEY "private_key.pem"
 #define AUTH_DEFAULT_RSA_PUBLIC_KEY "public_key.pem"
 
@@ -98,7 +106,6 @@ my_bool auth_rsa_auto_generate_rsa_keys= TRUE;
 static bool do_auto_rsa_keys_generation();
 static Rsa_authentication_keys g_rsa_keys;
 
-#endif /* HAVE_YASSL */
 #endif /* HAVE_OPENSSL */
 
 bool
@@ -118,7 +125,6 @@ Thd_charset_adapter::charset()
 }
 
 #if defined(HAVE_OPENSSL)
-#ifndef HAVE_YASSL
 
 /**
   @brief Set key file path
@@ -187,9 +193,9 @@ Rsa_authentication_keys::read_key_file(RSA **key_ptr,
   */
   if ((key_file= fopen(key_file_path.c_ptr(), "r")) == NULL)
   {
-    sql_print_information("RSA %s key file not found: %s."
-                          " Some authentication plugins will not work.",
-                          key_type, key_file_path.c_ptr());
+    sql_print_warning("RSA %s key file not found: %s."
+                      " Some authentication plugins will not work.",
+                      key_type, key_file_path.c_ptr());
   }
   else
   {
@@ -354,7 +360,6 @@ Rsa_authentication_keys::read_rsa_keys()
   return false;
 }
 
-#endif /* HAVE_YASSL */
 #endif /* HAVE_OPENSSL */
 
 /**
@@ -458,7 +463,11 @@ bool auth_plugin_supports_expiration(const char *plugin_name)
 static void login_failed_error(MPVIO_EXT *mpvio, int passwd_used)
 {
   THD *thd= current_thd;
-  if (passwd_used == 2)
+
+  if (thd->is_error())
+    sql_print_information("%s", thd->get_stmt_da()->message_text());
+
+  else if (passwd_used == 2)
   {
     my_error(ER_ACCESS_DENIED_NO_PASSWORD_ERROR, MYF(0),
              mpvio->auth_info.user_name,
@@ -881,7 +890,7 @@ static bool acl_check_ssl(THD *thd, const ACL_USER *acl_user)
 {
 #if defined(HAVE_OPENSSL)
   Vio *vio= thd->get_protocol_classic()->get_vio();
-  SSL *ssl= thd->get_protocol()->get_ssl();
+  SSL *ssl= (SSL*) vio->ssl_arg;
   X509 *cert;
 #endif /* HAVE_OPENSSL */
 
@@ -991,11 +1000,11 @@ static bool acl_check_ssl(THD *thd, const ACL_USER *acl_user)
 */
 bool rsa_auth_status()
 {
-#if !defined(HAVE_OPENSSL) || defined(HAVE_YASSL)
+#if !defined(HAVE_OPENSSL)
   return false;
 #else
   return (!g_rsa_keys.get_private_key() || !g_rsa_keys.get_public_key());
-#endif /* !HAVE_OPENSSL || HAVE_YASSL */
+#endif /* !HAVE_OPENSSL */
 }
 
 
@@ -1797,6 +1806,10 @@ static int server_mpvio_write_packet(MYSQL_PLUGIN_VIO *param,
   It transparently extracts the client plugin data, if embedded into
   a client authentication handshake packet, and handles plugin negotiation
   with the client, if necessary.
+
+  RETURN
+    -1          Protocol failure
+    >= 0        Success and also the packet length
 */
 static int server_mpvio_read_packet(MYSQL_PLUGIN_VIO *param, uchar **buf)
 {
@@ -1982,7 +1995,8 @@ server_mpvio_initialize(THD *thd, MPVIO_EXT *mpvio,
   mpvio->auth_info.host_or_ip_length= sctx_host_or_ip.length;
 
 #if defined(HAVE_OPENSSL) && !defined(EMBEDDED_LIBRARY)
-  if (thd->get_protocol()->get_ssl())
+  Vio *vio= thd->get_protocol_classic()->get_vio();
+  if (vio->ssl_arg)
     mpvio->vio_is_encrypted= 1;
   else
 #endif /* HAVE_OPENSSL && !EMBEDDED_LIBRARY */
@@ -2189,8 +2203,7 @@ acl_authenticate(THD *thd, enum_server_command command)
     if (parse_com_change_user_packet(&mpvio,
                                      mpvio.protocol->get_packet_length()))
     {
-      if (!thd->is_error())
-        login_failed_error(&mpvio, mpvio.auth_info.password_used);
+      login_failed_error(&mpvio, mpvio.auth_info.password_used);
       server_mpvio_update_thd(thd, &mpvio);
       DBUG_RETURN(1);
     }
@@ -2308,8 +2321,7 @@ acl_authenticate(THD *thd, enum_server_command command)
       acl_log_connect(mpvio.auth_info.user_name, mpvio.auth_info.host_or_ip,
         mpvio.auth_info.authenticated_as, mpvio.db.str, thd, command);
     }
-    if (!thd->is_error())
-      login_failed_error(&mpvio, mpvio.auth_info.password_used);
+    login_failed_error(&mpvio, mpvio.auth_info.password_used);
     DBUG_RETURN (1);
   }
 
@@ -2348,8 +2360,7 @@ acl_authenticate(THD *thd, enum_server_command command)
         Host_errors errors;
         errors.m_proxy_user= 1;
         inc_host_errors(mpvio.ip, &errors);
-        if (!thd->is_error())
-          login_failed_error(&mpvio, mpvio.auth_info.password_used);
+        login_failed_error(&mpvio, mpvio.auth_info.password_used);
         DBUG_RETURN(1);
       }
 
@@ -2368,8 +2379,7 @@ acl_authenticate(THD *thd, enum_server_command command)
         Host_errors errors;
         errors.m_proxy_user_acl= 1;
         inc_host_errors(mpvio.ip, &errors);
-        if (!thd->is_error())
-          login_failed_error(&mpvio, mpvio.auth_info.password_used);
+        login_failed_error(&mpvio, mpvio.auth_info.password_used);
         mysql_mutex_unlock(&acl_cache->lock);
         DBUG_RETURN(1);
       }
@@ -2407,8 +2417,7 @@ acl_authenticate(THD *thd, enum_server_command command)
       Host_errors errors;
       errors.m_ssl= 1;
       inc_host_errors(mpvio.ip, &errors);
-      if (!thd->is_error())
-        login_failed_error(&mpvio, thd->password);
+      login_failed_error(&mpvio, thd->password);
       DBUG_RETURN(1);
     }
 
@@ -2534,6 +2543,7 @@ acl_authenticate(THD *thd, enum_server_command command)
       Host_errors errors;
       errors.m_default_database= 1;
       inc_host_errors(mpvio.ip, &errors);
+      login_failed_error(&mpvio, mpvio.auth_info.password_used);
       DBUG_RETURN(1);
     }
   }
@@ -2557,125 +2567,6 @@ acl_authenticate(THD *thd, enum_server_command command)
 #endif /* HAVE_PSI_THREAD_INTERFACE */
 
   /* Ready to handle queries */
-  DBUG_RETURN(0);
-}
-
-/**
- Change the effective user, updating sctx variables such as priv user and
- master access.
-
- This is different from COM_CHANGE_USER, which requires re-authentication.
- This function only checks for the proxy privilege and update the acl user
- as needed.
-
-@param thd                     thread handle
-*/
-int change_effective_user(THD *thd) {
-  Security_context *sctx = thd->security_context();
-  LEX *const lex = thd->lex;
-  LEX_USER *target_user = lex->grant_user;
-  LEX_CSTRING auth_user = sctx->user();
-  ACL_PROXY_USER *proxy_user = NULL;
-  ACL_USER *acl_user = NULL;
-  const char *proxied_host = "%";
-  DBUG_ENTER("handle_change_user_cmd");
-
-  if (!target_user || !(target_user->user.length)) {
-    thd->set_row_count_func(0);
-    thd->get_stmt_da()->set_error_status(ER_ACCESS_DENIED_ERROR,
-                                         "No Target User Specified",
-                                         "HY000");
-    DBUG_RETURN(1);
-  }
-
-  if (!target_user->host.length || strcmp(target_user->host.str, "%")) {
-    thd->set_row_count_func(0);
-    thd->get_stmt_da()->set_error_status(ER_ACCESS_DENIED_ERROR,
-                                         "Change User to a Specific Host Not Allowed",
-                                         "HY000");
-    DBUG_RETURN(1);
-  }
-
-  if (opt_debug_change_user) {
-    // assert: target user must be of form u@% or u@''
-    sql_print_information("change effective user: auth user %s@'%s', target user %s@'%s'",
-                          sctx->user().str,
-                          sctx->host().str,
-                          target_user->user.str,
-                          target_user->host.str);
-  }
-
-  // an authenticated user is allowed to proxy as himself. yet still need to look up
-  // the acl list to keep the auth info updated
-  mysql_mutex_lock(&acl_cache->lock);
-  if (strcmp(target_user->user.str, auth_user.str)) {
-    proxy_user = acl_check_proxy_user(auth_user.str,
-                                    sctx->host().str,
-                                    sctx->ip().str,
-                                    target_user->user.str);
-    if (!proxy_user) {
-      mysql_mutex_unlock(&acl_cache->lock);
-      thd->set_row_count_func(0);
-      thd->get_stmt_da()->set_error_status(ER_ACCESS_DENIED_ERROR, "Access Denied", "HY000");
-      DBUG_RETURN(1);
-    }
-    // we want to respect the proxy privilege definition. but to avoid confusion,
-    // the proxied host should always be set to '%'
-    proxied_host = proxy_user->get_proxied_host() ? proxy_user->get_proxied_host() : "%";
-    if (opt_debug_change_user) {
-      // assert: now the target user would be u@?, according to the proxy user def
-      // the host could be empty, '%', or a concrete value
-      sql_print_information("change effective user: found proxied user %s@'%s'",
-                            proxy_user->get_proxied_user(),
-                            proxy_user->get_proxied_host());
-    }
-  } else {
-    // if the user want to change to oneself, the host would be the one
-    // for which has been authenticated
-    proxied_host = sctx->host_or_ip().str;
-    if (opt_debug_change_user) {
-      // assert: the target user should be the same as auth user, proxied host must not
-      // be empty
-      sql_print_information("change effective user: change to oneself, user %s@'%s'",
-                            auth_user.str,
-                            proxied_host);
-    }
-  }
-
-  if (opt_debug_change_user) {
-    sql_print_information("change effective user: looking for acl user %s@'%s'",
-                          target_user->user.str,
-                          proxied_host);
-  }
-
-  acl_user = find_acl_user(proxied_host, target_user->user.str, FALSE);
-  if (!acl_user) {
-    mysql_mutex_unlock(&acl_cache->lock);
-    thd->set_row_count_func(0);
-    thd->get_stmt_da()->set_error_status(ER_ACCESS_DENIED_ERROR, "Target User Not Found", "HY000");
-    DBUG_RETURN(1);
-  }
-  sctx->set_master_access(acl_user->access);
-  assign_priv_user_host(sctx, acl_user);
-  if (opt_debug_change_user) {
-    sql_print_information("change effective user: set priv user %s@'%s'",
-                          acl_user->user,
-                          acl_user->host.get_host());
-  }
-  mysql_mutex_unlock(&acl_cache->lock);
-
-  // update db access to the new user's
-  ulong db_access = 0;
-  if (thd->db().str) {
-    if (is_infoschema_db(thd->db().str, thd->db().length))
-      db_access = SELECT_ACL;
-    else
-      db_access = sctx->check_access(DB_ACLS) ? DB_ACLS :
-                  acl_get(sctx->host().str, sctx->ip().str, sctx->priv_user().str, thd->db().str, false) | sctx->master_access();
-  }
-  sctx->set_db_access(db_access);
-
-  my_ok(thd);
   DBUG_RETURN(0);
 }
 
@@ -2754,7 +2645,8 @@ int set_native_salt(const char* password, unsigned int password_len,
 int generate_sha256_password(char *outbuf, unsigned int *buflen,
                              const char *inbuf, unsigned int inbuflen)
 {
-  if (my_validate_password_policy(inbuf, inbuflen))
+  if (inbuflen > SHA256_PASSWORD_MAX_PASSWORD_LENGTH ||
+      my_validate_password_policy(inbuf, inbuflen))
     return 1;
   if (inbuflen == 0)
   {
@@ -2916,7 +2808,6 @@ int my_vio_is_encrypted(MYSQL_PLUGIN_VIO *vio)
 }
 
 #if defined(HAVE_OPENSSL)
-#ifndef HAVE_YASSL
 
 int show_rsa_public_key(THD *thd, SHOW_VAR *var, char *buff)
 { 
@@ -2959,7 +2850,6 @@ bool init_rsa_keys(void)
   return ((do_auto_rsa_keys_generation() == false) ||
           g_rsa_keys.read_rsa_keys());
 }
-#endif /* HAVE_YASSL */
 
 static MYSQL_PLUGIN plugin_info_ptr;
 
@@ -3015,12 +2905,10 @@ static int sha256_password_authenticate(MYSQL_PLUGIN_VIO *vio,
   char scramble[SCRAMBLE_LENGTH + 1];
   char stage2[CRYPT_MAX_PASSWORD_SIZE + 1];
   String scramble_response_packet;
-#if !defined(HAVE_YASSL)
   int cipher_length= 0;
   unsigned char plain_text[MAX_CIPHER_LENGTH + 1];
   RSA *private_key= NULL;
   RSA *public_key= NULL;
-#endif /* HAVE_YASSL */
 
   DBUG_ENTER("sha256_password_authenticate");
 
@@ -3052,8 +2940,12 @@ http://dev.mysql.com/doc/internals/en/connection-phase-packets.html#packet-Proto
   /*
     If first packet is a 0 byte then the client isn't sending any password
     else the client will send a password.
+
+    The original intention was that the password is a string[NUL] but this
+    never got enforced properly so now we have to accept that an empty packet
+    is a blank password, thus the check for pkt_len == 0 has to be made too.
   */
-  if (pkt_len == 1 && *pkt == 0)
+  if ((pkt_len == 0 || pkt_len == 1) && *pkt == 0)
   {
     info->password_used= PASSWORD_USED_NO;
     /*
@@ -3078,7 +2970,6 @@ http://dev.mysql.com/doc/internals/en/connection-phase-packets.html#packet-Proto
 
   if (!my_vio_is_encrypted(vio))
   {
- #if !defined(HAVE_YASSL)
     /*
       Since a password is being used it must be encrypted by RSA since no
       other encryption is being active.
@@ -3145,10 +3036,11 @@ http://dev.mysql.com/doc/internals/en/connection-phase-packets.html#packet-Proto
 
     if (pkt_len == 1)
       DBUG_RETURN(CR_ERROR);
-#else
-    DBUG_RETURN(CR_ERROR);
-#endif /* HAVE_YASSL */
   } // if(!my_vio_is_encrypter())
+
+  /* Don't process the password if it is longer than maximum limit */
+  if (pkt_len > SHA256_PASSWORD_MAX_PASSWORD_LENGTH + 1)
+    DBUG_RETURN(CR_ERROR);
 
   /* A password was sent to an account without a password */
   if (info->auth_string_length == 0)
@@ -3195,7 +3087,6 @@ http://dev.mysql.com/doc/internals/en/connection-phase-packets.html#packet-Proto
   DBUG_RETURN(CR_ERROR);
 }
 
-#if !defined(HAVE_YASSL)
 static MYSQL_SYSVAR_STR(private_key_path, auth_rsa_private_key_path,
         PLUGIN_VAR_READONLY,
         "A fully qualified path to the private RSA key used for authentication",
@@ -3462,7 +3353,24 @@ public:
   RSA *operator()(void)
   {
     /* generate RSA keys */
-    RSA *rsa= RSA_generate_key(m_key_size, m_exponent, NULL, NULL);
+    RSA *rsa= RSA_new();
+    if (!rsa)
+      return NULL;
+    BIGNUM *e= BN_new();
+    if (!e)
+    {
+      RSA_free(rsa);
+      return NULL;
+    }
+    if (!BN_set_word(e, m_exponent) ||
+        !RSA_generate_key_ex(rsa, m_key_size, e, NULL))
+    {
+      RSA_free(rsa);
+      BN_free(e);
+      return NULL;
+    }
+    BN_free(e);
+
     return rsa; // pass ownership
   }
 
@@ -3562,21 +3470,68 @@ public:
                     EVP_PKEY *ca_pkey= NULL)
   {
     X509 *x509= X509_new();
-    DBUG_ASSERT(cn.length() <= MAX_CN_NAME_LENGTH);
-    ASN1_INTEGER_set(X509_get_serialNumber(x509), serial);
-    X509_gmtime_adj(X509_get_notBefore(x509), notbefore);
-    X509_gmtime_adj(X509_get_notAfter(x509), notafter);
-    /* Set public key */
-    X509_set_pubkey(x509, pkey);
-    X509_NAME *name= X509_get_subject_name(x509);
-    X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC,
-      (const unsigned char *)cn.c_str(), -1, -1, 0);
+    X509_EXTENSION *ext= 0;
+    X509V3_CTX v3ctx;
+    X509_NAME *name= 0;
 
-    X509_set_issuer_name(x509,
-                         self_sign ? name : X509_get_subject_name(ca_x509));
-    X509_sign(x509, self_sign ? pkey : ca_pkey, EVP_sha256());
+    DBUG_ASSERT(cn.length() <= MAX_CN_NAME_LENGTH);
+    DBUG_ASSERT(serial != 0);
+    DBUG_ASSERT(self_sign || (ca_x509 != NULL && ca_pkey != NULL));
+    if (!x509)
+      goto err;
+
+    /** Set certificate version */
+    if (!X509_set_version(x509, 2))
+      goto err;
+
+    /** Set serial number */
+    if (!ASN1_INTEGER_set(X509_get_serialNumber(x509), serial))
+      goto err;
+
+    /** Set certificate validity */
+    if (!X509_gmtime_adj(X509_get_notBefore(x509), notbefore) ||
+        !X509_gmtime_adj(X509_get_notAfter(x509), notafter))
+      goto err;
+
+    /** Set public key */
+    if (!X509_set_pubkey(x509, pkey))
+      goto err;
+
+    /** Set CN value in subject */
+    name= X509_get_subject_name(x509);
+    if (!name)
+      goto err;
+
+    if (!X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC,
+                                    (const unsigned char *)cn.c_str(),
+                                    -1, -1, 0))
+      goto err;
+
+    /** Set Issuer */
+    if (!X509_set_issuer_name(x509, self_sign ? name :
+                                      X509_get_subject_name(ca_x509)))
+      goto err;
+
+    /** Add X509v3 extensions */
+    X509V3_set_ctx(&v3ctx, self_sign ? x509 : ca_x509, x509, NULL, NULL, 0);
+
+    /** Add CA:TRUE / CA:FALSE inforamation */
+    if (!(ext= X509V3_EXT_conf_nid(NULL, &v3ctx, NID_basic_constraints,
+                                   self_sign ?(char *)"critical,CA:TRUE" :
+                                              (char *)"critical,CA:FALSE")))
+      goto err;
+    X509_add_ext(x509, ext, -1);
+    X509_EXTENSION_free(ext);
+
+    /** Sign using SHA256 */
+    if (!X509_sign(x509, self_sign ? pkey : ca_pkey, EVP_sha256()))
+      goto err;
 
     return x509;
+err:
+    if (x509)
+      X509_free(x509);
+    return 0;
   }
 };
 
@@ -4169,7 +4124,6 @@ static bool do_auto_rsa_keys_generation()
     return true;
   }
 }
-#endif /* HAVE_YASSL */
 #endif /* HAVE_OPENSSL */
 
 bool MPVIO_EXT::can_authenticate()
@@ -4231,11 +4185,7 @@ mysql_declare_plugin(mysql_password)
   NULL,                                         /* Deinit function  */
   0x0101,                                       /* Version (1.0)    */
   NULL,                                         /* status variables */
-#if !defined(HAVE_YASSL)
   sha256_password_sysvars,                      /* system variables */
-#else
-  NULL,
-#endif /* HAVE_YASSL */
   NULL,                                         /* config options   */
   0                                             /* flags            */
 }

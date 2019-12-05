@@ -1,14 +1,21 @@
 /*
-   Copyright (c) 2000, 2016, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2000, 2018, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -283,6 +290,25 @@ bool mysql_create_frm(THD *thd, const char *file_name,
   keybuff=(uchar*) my_malloc(key_memory_frm,
                              key_buff_length, MYF(0));
   key_info_length= pack_keys(keybuff, keys, key_info, data_offset);
+
+  /* key_info_length is currently stored in 2 bytes */
+  if (key_info_length > 65535U)
+  {
+    char *real_table_name= (char*) table;
+    List_iterator<Create_field> it(create_fields);
+    Create_field *field;
+    while ((field=it++))
+    {
+      if (field->field && field->field->table &&
+         (real_table_name= field->field->table->s->table_name.str))
+        break;
+    }
+    my_printf_error(ER_UNKNOWN_ERROR,
+                    "Index information size for the table %s.%s exceeds the "
+                    "maximum limit (Max: 2 bytes). Please recreate indexes "
+                    "accordingly.", MYF(0), db, real_table_name);
+    goto err;
+  }
 
   /*
     Ensure that there are no forms in this newly created form file.
@@ -1268,8 +1294,6 @@ static bool make_empty_rec(THD *thd, File file,
   DBUG_ENTER("make_empty_rec");
 
   /* We need a table to generate columns for default values */
-  memset(&table, 0, sizeof(table));
-  memset(&share, 0, sizeof(share));
   table.s= &share;
 
   if (!(buff=(uchar*) my_malloc(key_memory_frm,

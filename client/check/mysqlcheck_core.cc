@@ -1,14 +1,21 @@
 /*
-   Copyright (c) 2001, 2016, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2001, 2017, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -384,6 +391,7 @@ static void print_result()
       {
         const char *alter_txt= strstr(row[3], "ALTER TABLE");
         found_error= 1;
+
         if (alter_txt)
         {
           table_rebuild= 1;
@@ -416,10 +424,29 @@ static void print_result()
             strcpy(prev_alter, alter_txt);
           }
         }
+	else
+        {
+          /*
+            Search the error message specific to pre 5.0 decimal type.
+            "REPAIR TABLE" should not be present in the error message and
+            "dump/reload" should be present in the error message. In this
+            case, do not add table to the repair list.
+          */
+          const char *repair_txt= strstr(row[3], "REPAIR TABLE");
+          const char *dump_txt= strstr(row[3], "dump/reload table");
+          if (dump_txt && !repair_txt)
+          {
+            found_error= 0;
+            table_rebuild= 0;
+            prev_alter[0]= '\0';
+            failed_tables.push_back(row[0]);
+          }
+        }
       }
     }
     else
       printf("%-9s: %s", row[2], row[3]);
+
     my_stpcpy(prev, row[0]);
     putchar('\n');
   }

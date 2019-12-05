@@ -1,6 +1,6 @@
 /***********************************************************************
 
-Copyright (c) 1995, 2017, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1995, 2019, Oracle and/or its affiliates. All Rights Reserved.
 Copyright (c) 2009, Percona Inc.
 
 Portions of this file contain modifications contributed and copyrighted
@@ -10,14 +10,21 @@ documentation. The contributions by Percona Inc. are incorporated with
 their permission, and subject to the conditions contained in the file
 COPYING.Percona.
 
-This program is free software; you can redistribute it and/or modify it
-under the terms of the GNU General Public License as published by the
-Free Software Foundation; version 2 of the License.
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License, version 2.0,
+as published by the Free Software Foundation.
 
-This program is distributed in the hope that it will be useful, but
-WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
-Public License for more details.
+This program is also distributed with certain software (including
+but not limited to OpenSSL) that is licensed under separate terms,
+as designated in a particular file or component or in included license
+documentation.  The authors of MySQL hereby grant you an additional
+permission to link the program and your derivative works with the
+separately licensed software that they have included with MySQL.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License, version 2.0, for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
@@ -209,6 +216,8 @@ mysql_pfs_key_t  innodb_temp_file_key;
 
 /** The asynchronous I/O context */
 struct Slot {
+	Slot() { memset(this, 0, sizeof(*this)); }
+
 	/** index of the slot in the aio array */
 	uint16_t		pos;
 
@@ -216,7 +225,7 @@ struct Slot {
 	bool			is_reserved;
 
 	/** time when reserved */
-	time_t			reservation_time;
+	ib_time_monotonic_t	reservation_time;
 
 	/** buffer used in i/o */
 	byte*			buf;
@@ -758,7 +767,7 @@ ulint	os_n_pending_writes = 0;
 /** Number of pending read operations */
 ulint	os_n_pending_reads = 0;
 
-time_t	os_last_printout;
+ib_time_monotonic_t	os_last_printout;
 bool	os_has_said_disk_full	= false;
 
 /** Default Zip compression level */
@@ -825,7 +834,7 @@ os_file_io_complete(
 	byte*		buf,
 	byte*		scratch,
 	ulint		src_len,
-	ulint		offset,
+	os_offset_t	offset,
 	ulint		len);
 
 /** Does simulated AIO. This function should be called by an i/o-handler
@@ -969,8 +978,7 @@ public:
 		return(os_file_io_complete(
 				slot->type, slot->file.m_file, slot->buf,
 				NULL, slot->original_len,
-				static_cast<ulint>(slot->offset),
-				slot->len));
+				slot->offset, slot->len));
 	}
 
 private:
@@ -1690,7 +1698,7 @@ os_file_io_complete(
 	byte*		buf,
 	byte*		scratch,
 	ulint		src_len,
-	ulint		offset,
+	os_offset_t	offset,
 	ulint		len)
 {
 	/* We never compress/decompress the first page */
@@ -2086,6 +2094,8 @@ os_file_compress_page(
 		old_compressed_len = ut_calc_align(
 			old_compressed_len + FIL_PAGE_DATA,
 			type.block_size());
+	} else {
+		old_compressed_len = *n;
 	}
 
 	byte*	compressed_page;
@@ -2343,6 +2353,9 @@ LinuxAIOHandler::resubmit(Slot* slot)
 	slot->n_bytes = 0;
 	slot->io_already_done = false;
 
+	/* make sure that slot->offset fits in off_t */
+	ut_ad(sizeof(off_t) >= sizeof(os_offset_t));
+
 	struct iocb*	iocb = &slot->control;
 	if (slot->type.is_read()) {
 		io_prep_pread(
@@ -2350,7 +2363,7 @@ LinuxAIOHandler::resubmit(Slot* slot)
 			slot->file.m_file,
 			slot->ptr,
 			slot->len,
-			static_cast<off_t>(slot->offset));
+			slot->offset);
 
 	} else {
 
@@ -2361,7 +2374,7 @@ LinuxAIOHandler::resubmit(Slot* slot)
 			slot->file.m_file,
 			slot->ptr,
 			slot->len,
-			static_cast<off_t>(slot->offset));
+			slot->offset);
 	}
 
 	iocb->data = slot;
@@ -2537,10 +2550,24 @@ LinuxAIOHandler::collect()
 			will be done in the calling function. */
 			m_array->acquire();
 
-			slot->ret = events[i].res2;
+			/* events[i].res2 should always be ZERO */
+			ut_ad(events[i].res2 == 0);
 			slot->io_already_done = true;
-			slot->n_bytes = events[i].res;
 
+			/*Even though events[i].res is an unsigned number
+			in libaio, it is used to return a negative value
+			(negated errno value) to indicate error and a positive
+			value to indicate number of bytes read or written. */
+
+			if (events[i].res > slot->len) {
+				/* failure */
+				slot->n_bytes = 0;
+				slot->ret = events[i].res;
+			} else {
+				/* success */
+				slot->n_bytes = events[i].res;
+				slot->ret = 0;
+			}
 			m_array->release();
 		}
 
@@ -3075,20 +3102,8 @@ os_file_fsync_posix(
 
 		case EIO:
 
-			++failures;
-			ut_a(failures < 1000);
-
-			if (!(failures % 100)) {
-
-				ib::warn()
-					<< "fsync(): "
-					<< "An error occurred during "
-					<< "synchronization,"
-					<< " retrying";
-			}
-
-			/* 0.2 sec */
-			os_thread_sleep(200000);
+                        ib::fatal()
+				<< "fsync() returned EIO, aborting.";
 			break;
 
 		case EINTR:
@@ -3128,7 +3143,8 @@ os_file_status_posix(
 	if (!ret) {
 		/* file exists, everything OK */
 
-	} else if (errno == ENOENT || errno == ENOTDIR) {
+	} else if (errno == ENOENT || errno == ENOTDIR
+		   || errno == ENAMETOOLONG) {
 		/* file does not exist */
 		return(true);
 
@@ -4158,7 +4174,8 @@ os_file_status_win32(
 	if (!ret) {
 		/* file exists, everything OK */
 
-	} else if (errno == ENOENT || errno == ENOTDIR) {
+	} else if (errno == ENOENT || errno == ENOTDIR
+		  || errno == ENAMETOOLONG) {
 		/* file does not exist */
 		return(true);
 
@@ -5449,8 +5466,7 @@ os_file_io(
 				*err = os_file_io_complete(
 					type, file,
 					reinterpret_cast<byte*>(buf),
-					NULL, original_n,
-					static_cast<ulint>(offset), n);
+					NULL, original_n, offset, n);
 			} else {
 
 				*err = DB_SUCCESS;
@@ -6301,7 +6317,7 @@ AIO::AIO(
 	m_not_full = os_event_create("aio_not_full");
 	m_is_empty = os_event_create("aio_is_empty");
 
-	memset(&m_slots[0], 0x0, sizeof(m_slots[0]) * m_slots.size());
+	std::uninitialized_fill(m_slots.begin(), m_slots.end(), Slot());
 #ifdef LINUX_NATIVE_AIO
 	memset(&m_events[0], 0x0, sizeof(m_events[0]) * m_events.size());
 #endif /* LINUX_NATIVE_AIO */
@@ -6585,7 +6601,7 @@ AIO::start(
 		os_aio_segment_wait_events[i] = os_event_create(0);
 	}
 
-	os_last_printout = ut_time();
+	os_last_printout = ut_time_monotonic();
 
 	return(true);
 }
@@ -6961,7 +6977,7 @@ AIO::reserve_slot(
 	}
 
 	slot->is_reserved = true;
-	slot->reservation_time = ut_time();
+	slot->reservation_time = ut_time_monotonic();
 	slot->m1       = m1;
 	slot->m2       = m2;
 	slot->file     = file;
@@ -7003,7 +7019,7 @@ AIO::reserve_slot(
 #else
 		slot->len = static_cast<ulint>(compressed_len);
 #endif /* _WIN32 */
-		slot->skip_punch_hole = type.punch_hole();
+		slot->skip_punch_hole = !type.punch_hole();
 
 		acquire();
 	}
@@ -7871,9 +7887,10 @@ private:
 	@param[in]	slot		The slot to check */
 	void select_if_older(Slot* slot)
 	{
-		ulint	age;
+		int64_t time_diff = ut_time_monotonic() -
+					slot->reservation_time;
 
-		age = (ulint) difftime(ut_time(), slot->reservation_time);
+		const uint64_t age = time_diff > 0 ? (uint64_t) time_diff : 0;
 
 		if ((age >= 2 && age > m_oldest)
 		    || (age >= 2
@@ -8252,9 +8269,9 @@ AIO::print_all(FILE* file)
 void
 os_aio_print(FILE*	file)
 {
-	time_t		current_time;
-	double		time_elapsed;
-	double		avg_bytes_read;
+	ib_time_monotonic_t 		current_time;
+	double	 			time_elapsed;
+	double				avg_bytes_read;
 
 	for (ulint i = 0; i < srv_n_file_io_threads; ++i) {
 		fprintf(file, "I/O thread %lu state: %s (%s)",
@@ -8276,8 +8293,8 @@ os_aio_print(FILE*	file)
 	AIO::print_all(file);
 
 	putc('\n', file);
-	current_time = ut_time();
-	time_elapsed = 0.001 + difftime(current_time, os_last_printout);
+	current_time = ut_time_monotonic();
+	time_elapsed = 0.001 + (current_time - os_last_printout);
 
 	fprintf(file,
 		"Pending flushes (fsync) log: " ULINTPF "; "
@@ -8341,7 +8358,7 @@ os_aio_refresh_stats()
 
 	os_bytes_read_since_printout = 0;
 
-	os_last_printout = ut_time();
+	os_last_printout = ut_time_monotonic();
 }
 
 /** Checks that all slots in the system have been freed, that is, there are

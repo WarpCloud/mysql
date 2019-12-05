@@ -1,14 +1,21 @@
-# Copyright (c) 2010, 2017, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2010, 2019, Oracle and/or its affiliates. All rights reserved.
 # 
 # This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; version 2 of the License.
-# 
+# it under the terms of the GNU General Public License, version 2.0,
+# as published by the Free Software Foundation.
+#
+# This program is also distributed with certain software (including
+# but not limited to OpenSSL) that is licensed under separate terms,
+# as designated in a particular file or component or in included license
+# documentation.  The authors of MySQL hereby grant you an additional
+# permission to link the program and your derivative works with the
+# separately licensed software that they have included with MySQL.
+#
 # This program is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-# 
+# GNU General Public License, version 2.0, for more details.
+#
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
@@ -26,16 +33,6 @@
 #
 # Either way: we will unpack the zip, compile gmock-all.cc and gtest-all.cc
 # and link them into the executables.
-
-# Disable googletest for Solaris Studio < 12.4 since it doesn't compile.
-IF(CMAKE_C_COMPILER_ID MATCHES "SunPro")
-  IF(${CC_MINOR_VERSION} LESS 13)
-    MESSAGE(WARNING "Googletest requires Solaris Studio 12.4 or newer.")
-    UNSET(GMOCK_FOUND)
-    UNSET(GMOCK_FOUND CACHE)
-    RETURN()
-  ENDIF()
-ENDIF()
 
 # Default location for where to download and build gmock/gtest.
 IF(NOT DOWNLOAD_ROOT)
@@ -55,6 +52,7 @@ IF(LOCAL_GMOCK_ZIP
 ENDIF()
 
 IF (WITH_GMOCK)
+  FILE(TO_CMAKE_PATH "${WITH_GMOCK}" WITH_GMOCK)
   ## Did we get a full path name, including file name?
   IF (${WITH_GMOCK} MATCHES ".*\\.zip")
     GET_FILENAME_COMPONENT(GMOCK_DIR ${WITH_GMOCK} PATH)
@@ -191,39 +189,26 @@ SET(GMOCK_INCLUDE_DIRS
   CACHE INTERNAL "")
 
 # Build gmock/gtest libraries.
-INCLUDE_DIRECTORIES(
+INCLUDE_DIRECTORIES(SYSTEM
   ${GMOCK_SOURCE_DIR}
   ${GMOCK_SOURCE_DIR}/include
   ${GTEST_SOURCE_DIR}
   ${GTEST_SOURCE_DIR}/include
 )
 
-# Turn off some warning flags when compiling GUnit
-MY_CHECK_CXX_COMPILER_FLAG("-Wno-unused-local-typedefs" HAVE_NO_UNUSED_TYPEDEFS)
-IF(HAVE_NO_UNUSED_TYPEDEFS)
-  SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-local-typedefs")
-ENDIF()
-MY_CHECK_CXX_COMPILER_FLAG("-Wno-missing-field-initializers"
-                           HAVE_NO_MISSING_FIELD_INITIALIZERS)
-IF(HAVE_NO_MISSING_FIELD_INITIALIZERS)
-  SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-missing-field-initializers")
-ENDIF()
+# Some tests require Boost.
+INCLUDE_DIRECTORIES(SYSTEM ${BOOST_PATCHES_DIR} ${BOOST_INCLUDE_DIR})
 
 MY_CHECK_CXX_COMPILER_FLAG("-fno-builtin-memcmp" HAVE_NO_BUILTIN_MEMCMP)
-MY_CHECK_CXX_COMPILER_FLAG("-Wempty-body" HAVE_EMPTY_BODY)
+MY_CHECK_CXX_COMPILER_FLAG("-Wformat-overflow" HAVE_FORMAT_OVERFLOW)
 
 ADD_LIBRARY(gmock STATIC ${GMOCK_SOURCE_DIR}/src/gmock-all.cc)
 ADD_LIBRARY(gtest STATIC ${GTEST_SOURCE_DIR}/src/gtest-all.cc)
 SET(GTEST_LIBRARIES gmock gtest)
 
-IF (WITH_SSL STREQUAL "bundled")
-  ADD_SUBDIRECTORY(yassl)
-ENDIF()
-
 INCLUDE_DIRECTORIES(
   ${CMAKE_SOURCE_DIR}/include
   ${CMAKE_SOURCE_DIR}/libbinlogevents/include
-  ${ZLIB_INCLUDE_DIR}
   ${CMAKE_SOURCE_DIR}/regex
   ${CMAKE_SOURCE_DIR}/sql
   ${CMAKE_SOURCE_DIR}/sql/auth
@@ -285,10 +270,13 @@ SET(TESTS
   my_murmur3
   my_qsort_vs_stdsort
   my_regex
+  my_snprintf
   my_thread
   mysys_base64
   mysys_lf
   mysys_my_atomic
+  mysys_my_b_vprintf
+  mysys_my_freopen
   mysys_my_loadpath
   mysys_my_malloc
   mysys_my_pwrite
@@ -317,10 +305,6 @@ SET(TESTS
  
 IF (UNIX)
   LIST(APPEND TESTS path auth_utils)
-ENDIF()
-
-IF(WIN32)
-  LIST(APPEND TESTS win_tests)
 ENDIF()
 
 # Add tests (link them with gunit/gmock libraries and the server libraries) 
@@ -367,6 +351,10 @@ SET(SERVER_TESTS
   initialize_password
 )
 
+IF(WIN32)
+  LIST(APPEND SERVER_TESTS win_tests)
+ENDIF()
+
 ## Merging tests into fewer executables saves *a lot* of
 ## link time and disk space ...
 OPTION(MERGE_UNITTESTS "Merge tests into one executable" ON)
@@ -383,15 +371,18 @@ IF (MERGE_UNITTESTS)
       COMPILE_FLAGS "-Wno-empty-body"
     )
   ENDIF()
-  ADD_COMPILE_FLAGS(
-    ${MERGE_SMALL_TESTS}
-    COMPILE_FLAGS -I${BOOST_PATCHES_DIR} -I${BOOST_INCLUDE_DIR}
-  )
   # Fixes "C1128: number of sections exceeded object file format limit" in MSVC
   IF(WIN32)
     ADD_COMPILE_FLAGS(
       ${MERGE_LARGE_TESTS}
       COMPILE_FLAGS "/bigobj")
+  ENDIF()
+
+  # Suppress -Wformat-overflow= for my_safe_snprintf(" %s ", nullptr)
+  IF(HAVE_FORMAT_OVERFLOW)
+    ADD_COMPILE_FLAGS(
+      ${MERGE_LARGE_TESTS}
+      COMPILE_FLAGS "-Wno-format-overflow")
   ENDIF()
 
   INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
@@ -465,14 +456,13 @@ ENDIF(MERGE_UNITTESTS)
       COMPILE_FLAGS "-Wno-empty-body"
   )
   ENDIF()
-  ADD_COMPILE_FLAGS(
-    bounded_queue-t.cc
-    COMPILE_FLAGS -I${BOOST_PATCHES_DIR} -I${BOOST_INCLUDE_DIR}
-  )
-  ADD_COMPILE_FLAGS(
-    pump_object_filter-t.cc
-    COMPILE_FLAGS -I${BOOST_PATCHES_DIR} -I${BOOST_INCLUDE_DIR}
-  )
+
+  # Suppress -Wformat-overflow= for my_safe_snprintf(" %s ", nullptr)
+  IF(HAVE_FORMAT_OVERFLOW)
+    ADD_COMPILE_FLAGS(
+      segfault-t.cc
+      COMPILE_FLAGS "-Wno-format-overflow")
+  ENDIF()
 
   FOREACH(test ${SERVER_TESTS})
     SET(SRC_FILES ${test}-t.cc)
@@ -504,9 +494,6 @@ ENDIF(MERGE_UNITTESTS)
       ADD_TEST(${test} ${test}-t)
     ENDIF()
   ENDFOREACH()
-
-## Most executables depend on libeay32.dll (through mysys_ssl).
-COPY_OPENSSL_DLLS(copy_openssl_gunit)
 
 ADD_SUBDIRECTORY(innodb)
 ADD_SUBDIRECTORY(keyring)

@@ -1,14 +1,21 @@
 /*
-  Copyright (c) 2015, 2016 Oracle and/or its affiliates. All rights reserved.
+  Copyright (c) 2015, 2017 Oracle and/or its affiliates. All rights reserved.
 
   This program is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; version 2 of the License.
+  it under the terms of the GNU General Public License, version 2.0,
+  as published by the Free Software Foundation.
+
+  This program is also distributed with certain software (including
+  but not limited to OpenSSL) that is licensed under separate terms,
+  as designated in a particular file or component or in included license
+  documentation.  The authors of MySQL hereby grant you an additional
+  permission to link the program and your derivative works with the
+  separately licensed software that they have included with MySQL.
 
   This program is distributed in the hope that it will be useful,
   but WITHOUT ANY WARRANTY; without even the implied warranty of
   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
+  GNU General Public License, version 2.0, for more details.
 
   You should have received a copy of the GNU General Public License
   along with this program; if not, write to the Free Software
@@ -39,10 +46,14 @@ Table::Table(uint64 id, const std::string& name, const std::string& schema,
   for (std::vector<std::string>::iterator it= definition_lines.begin();
     it != definition_lines.end(); ++it)
   {
+    /*
+      MAINTAINER: This code parses the output of SHOW CREATE TABLE.
+      @TODO: Instead, look up INFORMATION_SCHEMA and get the table details.
+    */
+
     boost::trim_left(*it);
     if (!engine_line_read)
       boost::trim_if(*it, boost::is_any_of(","));
-    // TODO: Look up INFORMATION_SCHEMA and get the table details.
     if (boost::starts_with(*it, "KEY ")
       || boost::starts_with(*it, "INDEX ")
       || boost::starts_with(*it, "UNIQUE KEY ")
@@ -57,7 +68,12 @@ Table::Table(uint64 id, const std::string& name, const std::string& schema,
     }
     else
     {
-      if (boost::starts_with(*it, ") ENGINE="))
+      /*
+        Make sure we detect the table options clauses,
+        even with different syntaxes (with or without TABLESPACE)
+      */
+      if (boost::starts_with(*it, ")") &&
+          boost::contains(*it, "ENGINE="))
       {
         engine_line_read= true;
         std::string &sql_def = m_sql_definition_without_indexes;

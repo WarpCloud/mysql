@@ -1,13 +1,20 @@
-/* Copyright (c) 2006, 2016, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2006, 2018, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -34,13 +41,12 @@ partition_info *partition_info::get_clone(bool reset /* = false */)
   DBUG_ENTER("partition_info::get_clone");
   List_iterator<partition_element> part_it(partitions);
   partition_element *part;
-  partition_info *clone= new partition_info();
+  partition_info *clone= new partition_info(*this);
   if (!clone)
   {
     mem_alloc_error(sizeof(partition_info));
     DBUG_RETURN(NULL);
   }
-  memcpy(clone, this, sizeof(partition_info));
   memset(&(clone->read_partitions), 0, sizeof(clone->read_partitions));
   memset(&(clone->lock_partitions), 0, sizeof(clone->lock_partitions));
   clone->bitmaps_are_initialized= FALSE;
@@ -51,13 +57,12 @@ partition_info *partition_info::get_clone(bool reset /* = false */)
   {
     List_iterator<partition_element> subpart_it(part->subpartitions);
     partition_element *subpart;
-    partition_element *part_clone= new partition_element();
+    partition_element *part_clone= new partition_element(*part);
     if (!part_clone)
     {
       mem_alloc_error(sizeof(partition_element));
       DBUG_RETURN(NULL);
     }
-    memcpy(part_clone, part, sizeof(partition_element));
 
     /*
       Mark that RANGE and LIST values needs to be fixed so that we don't
@@ -81,13 +86,12 @@ partition_info *partition_info::get_clone(bool reset /* = false */)
     part_clone->subpartitions.empty();
     while ((subpart= (subpart_it++)))
     {
-      partition_element *subpart_clone= new partition_element();
+      partition_element *subpart_clone= new partition_element(*subpart);
       if (!subpart_clone)
       {
         mem_alloc_error(sizeof(partition_element));
         DBUG_RETURN(NULL);
       }
-      memcpy(subpart_clone, subpart, sizeof(partition_element));
       part_clone->subpartitions.push_back(subpart_clone);
     }
     clone->partitions.push_back(part_clone);
@@ -1921,7 +1925,6 @@ void partition_info::print_no_partition_found(TABLE *table_arg)
   char *buf_ptr= (char*)&buf;
   TABLE_LIST table_list;
 
-  memset(&table_list, 0, sizeof(table_list));
   table_list.db= table_arg->s->db.str;
   table_list.table_name= table_arg->s->table_name.str;
 

@@ -1,15 +1,21 @@
 /*
  * Copyright (c) 2015, 2017, Oracle and/or its affiliates. All rights reserved.
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; version 2 of the
- * License.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License, version 2.0,
+ * as published by the Free Software Foundation.
+ *
+ * This program is also distributed with certain software (including
+ * but not limited to OpenSSL) that is licensed under separate terms,
+ * as designated in a particular file or component or in included license
+ * documentation.  The authors of MySQL hereby grant you an additional
+ * permission to link the program and your derivative works with the
+ * separately licensed software that they have included with MySQL.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License, version 2.0, for more details.
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
@@ -1117,6 +1123,29 @@ ngs::Error_code is_schema_selected_and_exists(xpl::Sql_data_context &da, const s
   return da.execute_sql_no_result(qb.get().data(), qb.get().length(), info);
 }
 
+template<typename T>
+T get_system_variable(xpl::Sql_data_context &da, const std::string &variable)
+{
+  xpl::Sql_data_result result(da);
+  try
+  {
+    result.query(("SELECT @@" + variable).c_str());
+    if (result.size() != 1)
+    {
+      log_error("Unable to retrieve system variable '%s'", variable.c_str());
+      return T();
+    }
+    T value = T();
+    result.get(value);
+    return value;
+  }
+  catch (const ngs::Error_code &)
+  {
+    log_error("Unable to retrieve system variable '%s'", variable.c_str());
+    return T();
+  }
+}
+
 const char *const COUNT_DOC =
     "COUNT(CASE WHEN (column_name = 'doc' "
     "AND data_type = 'json') THEN 1 ELSE NULL END)";
@@ -1141,6 +1170,15 @@ ngs::Error_code xpl::Admin_command_handler::list_objects(Command_arguments &args
 {
   m_session.update_status<&Common_status_variables::m_stmt_list_objects>();
 
+  static const bool is_table_names_case_sensitive =
+      get_system_variable<long>(m_da, "lower_case_table_names") == 0l;
+
+  static const char *const BINARY_OPERATOR =
+      is_table_names_case_sensitive &&
+              get_system_variable<long>(m_da, "lower_case_file_system") == 0l
+          ? "BINARY "
+          : "";
+
   std::string schema, pattern;
   ngs::Error_code error = args
       .string_arg("schema", schema, true)
@@ -1148,14 +1186,18 @@ ngs::Error_code xpl::Admin_command_handler::list_objects(Command_arguments &args
   if (error)
     return error;
 
+  if (!is_table_names_case_sensitive) schema = to_lower(schema);
+
   error = is_schema_selected_and_exists(m_da, schema);
   if (error)
     return error;
 
   Query_string_builder qb;
-  qb.put("SELECT BINARY T.table_name AS name, "
-         "IF(ANY_VALUE(T.table_type) LIKE '%VIEW', "
-         "IF(COUNT(*)=1 AND ")
+  qb.put("SELECT ")
+      .put(BINARY_OPERATOR)
+      .put("T.table_name AS name, "
+           "IF(ANY_VALUE(T.table_type) LIKE '%VIEW', "
+           "IF(COUNT(*)=1 AND ")
       .put(COUNT_DOC)
       .put("=1, 'COLLECTION_VIEW', 'VIEW'), IF(COUNT(*)-2 = ")
       .put(COUNT_GEN)
@@ -1165,9 +1207,11 @@ ngs::Error_code xpl::Admin_command_handler::list_objects(Command_arguments &args
       .put(COUNT_ID)
       .put("=1, 'COLLECTION', 'TABLE')) AS type "
            "FROM information_schema.tables AS T "
-           "LEFT JOIN information_schema.columns AS C ON ("
-           "BINARY T.table_schema = C.table_schema AND "
-           "BINARY T.table_name = C.table_name) "
+           "LEFT JOIN information_schema.columns AS C ON (")
+      .put(BINARY_OPERATOR)
+      .put("T.table_schema = C.table_schema AND ")
+      .put(BINARY_OPERATOR)
+      .put("T.table_name = C.table_name) "
            "WHERE T.table_schema = ");
   if (schema.empty())
     qb.put("schema()");

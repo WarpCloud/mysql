@@ -1,13 +1,20 @@
-/* Copyright (c) 2004, 2016, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2004, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software Foundation,
@@ -211,8 +218,13 @@ fill_defined_view_parts (THD *thd, TABLE_LIST *view)
   size_t key_length;
   LEX *lex= thd->lex;
   TABLE_LIST decoy;
-
-  memcpy (&decoy, view, sizeof (TABLE_LIST));
+  decoy= *view;
+  /*
+    It's not clear what the above assignment actually wants to
+    accomplish. What we do know is that it does *not* want to copy the MDL
+    request, so we overwrite it with an uninitialized request.
+  */
+  decoy.mdl_request = MDL_request();
 
   key_length= get_table_def_key(view, &key);
 
@@ -1165,24 +1177,8 @@ bool open_and_read_view(THD *thd, TABLE_SHARE *share,
   {
     /*
       It's an execution of a PS/SP and the view has already been unfolded
-      into a list of used tables. Now we only need to update the information
-      about granted privileges in the view tables with the actual data
-      stored in MySQL privilege system.  We don't need to restore the
-      required privileges (by calling register_want_access) because they has
-      not changed since PREPARE or the previous execution: the only case
-      when this information is changed is execution of UPDATE on a view, but
-      the original want_access is restored in its end.
-
-      Optimizer trace: because tables have been unfolded already, they are
-      in LEX::query_tables of the statement using the view. So privileges on
-      them are checked as done for explicitely listed tables, in constructor
-      of Opt_trace_start. Security context change is checked in
-      prepare_security() below.
+      into a list of used tables.
     */
-    if (!view_ref->prelocking_placeholder &&
-        view_ref->prepare_security(thd))
-      DBUG_RETURN(true);
-
     DBUG_PRINT("info",
                ("VIEW %s.%s is already processed on previous PS/SP execution",
                 view_ref->view_db.str, view_ref->view_name.str));
@@ -1251,6 +1247,19 @@ bool open_and_read_view(THD *thd, TABLE_SHARE *share,
   DBUG_RETURN(false);
 }
 
+/**
+  Merge a view query expression into the parent expression.
+  Update all LEX pointers inside the view expression to point to the parent LEX.
+
+  @param view_lex  View's LEX object.
+  @param parent_lex   Original LEX object.
+*/
+void merge_query_blocks(LEX *view_lex, LEX *parent_lex)
+{
+  for (SELECT_LEX *select= view_lex->all_selects_list;
+       select != NULL; select= select->next_select_in_list())
+    select->parent_lex= parent_lex;
+}
 
 /**
   Parse a view definition.
@@ -1681,6 +1690,8 @@ bool parse_view_definition(THD *thd, TABLE_LIST *view_ref)
     sl->context.view_error_handler_arg= view_ref;
   }
 
+  merge_query_blocks(thd->lex, old_lex);
+
   view_select->linkage= DERIVED_TABLE_TYPE;
 
   // Updatability is not decided yet
@@ -2075,7 +2086,6 @@ mysql_rename_view(THD *thd,
       view definition parsing or use temporary 'view_def'
       object for it.
     */
-    memset(&view_def, 0, sizeof(view_def));
     view_def.timestamp.str= view_def.timestamp_buffer;
     view_def.view_suid= TRUE;
 

@@ -1,13 +1,20 @@
-/* Copyright (c) 2010, 2016, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2010, 2017, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -20,21 +27,22 @@
 extern "C" {
 #endif
 
+#include <assert.h>
+
 /**
     Initialize an array
  */
-#define def_init_xdr_array(name) void init_##name##_array(name##_array  *x)
-#define init_xdr_array(name)               \
-def_init_xdr_array(name)\
-{\
-  x->name##_array_len = 2;\
-  x->name##_array_val = calloc(x->name##_array_len, sizeof(name));\
-}
+#define def_init_xdr_array(name) static inline void init_##name##_array(name##_array *x)
+#define init_xdr_array(name)                                                 \
+  def_init_xdr_array(name) {                                                 \
+    x->name##_array_len = 2;                                                 \
+    x->name##_array_val = calloc((size_t)x->name##_array_len, sizeof(name)); \
+  }
 
 /**
     Free the contents of an array
  */
-#define def_free_xdr_array(name) void free_##name##_array(name##_array *x)
+#define def_free_xdr_array(name) static inline void free_##name##_array(name##_array *x)
 #define free_xdr_array(name)\
 def_free_xdr_array(name)\
 {\
@@ -60,19 +68,19 @@ def_free_xdr_array(name)\
 /**
     Define a set function for an array
  */
-#define def_set_xdr_array(name) void set_##name(name##_array *x, name a, u_int n)
-#define set_xdr_array(name)                     \
-  def_set_xdr_array(name)                       \
-  {                                             \
-    expand_xdr_array(name);                     \
-    assert(n < x->name##_array_len);          \
-    x->name##_array_val[n] = a;                 \
+#define def_set_xdr_array(name) \
+  static inline void set_##name(name##_array *x, name a, u_int n)
+#define set_xdr_array(name)          \
+  def_set_xdr_array(name) {          \
+    expand_xdr_array(name);          \
+    assert(n < x->name##_array_len); \
+    x->name##_array_val[n] = a;      \
   }
 
 /**
     Define a get function for an array
  */
-#define def_get_xdr_array(name) name get_##name(name##_array *x, u_int n)
+#define def_get_xdr_array(name) static inline name get_##name(name##_array *x, u_int n)
 #define get_xdr_array(name)                     \
   def_get_xdr_array(name)                       \
   {                                             \
@@ -85,24 +93,25 @@ def_free_xdr_array(name)\
 /**
     Define a function to clone an array
  */
-#define def_clone_xdr_array(name) name##_array clone_##name##_array(name##_array x)
-#define clone_xdr_array(name)                \
-  def_clone_xdr_array(name)                  \
-  {                                          \
-    name##_array retval=x;                     \
-    u_int i;                                      \
-    retval.name##_array_len = x.name##_array_len;                       \
-    DBGOUT(FN;STRLIT("clone_xdr_array"); NDBG(retval.name##_array_len,u));    \
-    if(retval.name##_array_len > 0){                                    \
-      retval.name##_array_val = calloc(x.name##_array_len, sizeof(name)); \
-      for(i = 0; i < retval.name##_array_len; i++){                     \
-        retval.name##_array_val[i] = x.name##_array_val[i]; \
-    	DBGOUT(FN;STRLIT("clone_xdr_array"); NDBG(i,u));    \
-      }                                                                 \
-    }else{                                                              \
-      retval.name##_array_val = 0;                                      \
-    }                                                                   \
-    return retval;                                                      \
+#define def_clone_xdr_array(name) \
+  static inline name##_array clone_##name##_array(name##_array x)
+#define clone_xdr_array(name)                                                \
+  def_clone_xdr_array(name) {                                                \
+    name##_array retval = x;                                                 \
+    u_int i;                                                                 \
+    retval.name##_array_len = x.name##_array_len;                            \
+    DBGOUT(FN; STRLIT("clone_xdr_array"); NDBG(retval.name##_array_len, u)); \
+    if (retval.name##_array_len > 0) {                                       \
+      retval.name##_array_val =                                              \
+          calloc((size_t)x.name##_array_len, sizeof(name));                  \
+      for (i = 0; i < retval.name##_array_len; i++) {                        \
+        retval.name##_array_val[i] = x.name##_array_val[i];                  \
+        DBGOUT(FN; STRLIT("clone_xdr_array"); NDBG(i, u));                   \
+      }                                                                      \
+    } else {                                                                 \
+      retval.name##_array_val = 0;                                           \
+    }                                                                        \
+    return retval;                                                           \
   }
 
 /**

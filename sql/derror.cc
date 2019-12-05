@@ -1,13 +1,20 @@
-/* Copyright (c) 2000, 2015, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2000, 2018, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software Foundation,
@@ -38,7 +45,8 @@ const char* MY_LOCALE_ERRMSGS::lookup(int mysql_errno)
   int offset= 0; // Position where the current section starts in the array.
   for (int i= 0; i < NUM_SECTIONS; i++)
   {
-    if (mysql_errno < (errmsg_section_start[i] + errmsg_section_size[i]))
+    if (mysql_errno >= errmsg_section_start[i] &&
+        mysql_errno < (errmsg_section_start[i] + errmsg_section_size[i]))
       return errmsgs[mysql_errno - errmsg_section_start[i] + offset];
     offset+= errmsg_section_size[i];
   }

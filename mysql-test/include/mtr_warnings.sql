@@ -1,13 +1,20 @@
--- Copyright (c) 2008, 2016, Oracle and/or its affiliates. All rights reserved.
+-- Copyright (c) 2008, 2019, Oracle and/or its affiliates. All rights reserved.
 --
 -- This program is free software; you can redistribute it and/or modify
--- it under the terms of the GNU General Public License as published by
--- the Free Software Foundation; version 2 of the License.
+-- it under the terms of the GNU General Public License, version 2.0,
+-- as published by the Free Software Foundation.
+--
+-- This program is also distributed with certain software (including
+-- but not limited to OpenSSL) that is licensed under separate terms,
+-- as designated in a particular file or component or in included license
+-- documentation.  The authors of MySQL hereby grant you an additional
+-- permission to link the program and your derivative works with the
+-- separately licensed software that they have included with MySQL.
 --
 -- This program is distributed in the hope that it will be useful,
 -- but WITHOUT ANY WARRANTY; without even the implied warranty of
 -- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
--- GNU General Public License for more details.
+-- GNU General Public License, version 2.0, for more details.
 --
 -- You should have received a copy of the GNU General Public License
 -- along with this program; if not, write to the Free Software Foundation,
@@ -262,6 +269,16 @@ INSERT INTO global_suppressions VALUES
  ("Insecure configuration for --secure-file-priv:*"),
 
  /*
+   Bug#26585560, warning related to --pid-file
+ */
+ ("Insecure configuration for --pid-file:*"),
+ ("Few location(s) are inaccessible while checking PID filepath"),
+ /*
+   Following WL#12670, this warning is expected.
+ */
+ ("Setting named_pipe_full_access_group='\\*everyone\\*' is insecure"),
+
+ /*
    On slow runs (valgrind) the message may be sent twice.
   */
  ("The member with address .* has already sent the stable set. Therefore discarding the second message."),
@@ -276,10 +293,21 @@ INSERT INTO global_suppressions VALUES
  ("\\[GCS\\] The member is already leaving or joining a group."),
  ("\\[GCS\\] The member is leaving a group without being on one."),
  ("\\[GCS\\] Processing new view on handler without a valid group configuration."),
- ("\\[GCS\\] Error on opening a connection to localhost:.* on local port: .*. Error= 0"),
+ ("\\[GCS\\] Error on opening a connection to localhost:.* on local port: .*."),
  ("\\[GCS\\] Error pushing message into group communication engine."),
  ("\\[GCS\\] Message cannot be sent because the member does not belong to a group."),
+ ("\\[GCS\\] Automatically adding IPv4 localhost address to the whitelist. It is mandatory that it is added."),
  ("Slave SQL for channel 'group_replication_recovery': ... The slave coordinator and worker threads are stopped, possibly leaving data in inconsistent state.*"),
+ ("Member with address .* has become unreachable."),
+ ("This server is not able to reach a majority of members in the group.*"),
+ ("Member with address .* is reachable again."),
+ ("The member has resumed contact with a majority of the members in the group.*"),
+ ("Members removed from the group.*"),
+ /*
+   Missing Private/Public key files
+ */
+ ("RSA private key file not found"),
+ ("RSA public key file not found"),
 
  ("THE_LAST_SUPPRESSION")||
 

@@ -1,14 +1,22 @@
 /*****************************************************************************
 
-Copyright (c) 2009, 2016, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2009, 2019, Oracle and/or its affiliates. All Rights Reserved.
 
-This program is free software; you can redistribute it and/or modify it under
-the terms of the GNU General Public License as published by the Free Software
-Foundation; version 2 of the License.
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License, version 2.0,
+as published by the Free Software Foundation.
 
-This program is distributed in the hope that it will be useful, but WITHOUT
-ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
-FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+This program is also distributed with certain software (including
+but not limited to OpenSSL) that is licensed under separate terms,
+as designated in a particular file or component or in included license
+documentation.  The authors of MySQL hereby grant you an additional
+permission to link the program and your derivative works with the
+separately licensed software that they have included with MySQL.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License, version 2.0, for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
@@ -37,6 +45,7 @@ Created Jan 06, 2010 Vasil Dimov
 #include "ha_prototypes.h"
 #include "ut0new.h"
 #include <mysql_com.h>
+#include "row0mysql.h"
 
 #include <algorithm>
 #include <map>
@@ -182,7 +191,7 @@ dict_stats_persistent_storage_check(
 			DATA_NOT_NULL, 192},
 
 		{"table_name", DATA_VARMYSQL,
-			DATA_NOT_NULL, 192},
+			DATA_NOT_NULL, 597},
 
 		{"last_update", DATA_FIXBINARY,
 			DATA_NOT_NULL, 4},
@@ -210,7 +219,7 @@ dict_stats_persistent_storage_check(
 			DATA_NOT_NULL, 192},
 
 		{"table_name", DATA_VARMYSQL,
-			DATA_NOT_NULL, 192},
+			DATA_NOT_NULL, 597},
 
 		{"index_name", DATA_VARMYSQL,
 			DATA_NOT_NULL, 192},
@@ -923,7 +932,7 @@ dict_stats_update_transient(
 	table->stat_sum_of_other_index_sizes = sum_of_index_sizes
 		- index->stat_index_size;
 
-	table->stats_last_recalc = ut_time();
+	table->stats_last_recalc = ut_time_monotonic();
 
 	table->stat_modified_counter = 0;
 
@@ -2242,7 +2251,7 @@ dict_stats_update_persistent(
 			+= index->stat_index_size;
 	}
 
-	table->stats_last_recalc = ut_time();
+	table->stats_last_recalc = ut_time_monotonic();
 
 	table->stat_modified_counter = 0;
 
@@ -3020,6 +3029,7 @@ dict_stats_update_for_index(
 		if (dict_stats_persistent_storage_check(false)) {
 			dict_table_stats_lock(index->table, RW_X_LATCH);
 			dict_stats_analyze_index(index);
+			index->table->stat_sum_of_other_index_sizes += index->stat_index_size;
 			dict_table_stats_unlock(index->table, RW_X_LATCH);
 			dict_stats_save(index->table, &index->id);
 			DBUG_VOID_RETURN;
@@ -3590,6 +3600,9 @@ This function creates its own transaction and commits it.
 dberr_t
 dict_stats_rename_table(
 /*====================*/
+	bool		dict_locked,	/*!< in: true if dict_sys mutex
+					and dict_operation_lock are held,
+					otherwise false*/
 	const char*	old_name,	/*!< in: old name, e.g. 'db/table' */
 	const char*	new_name,	/*!< in: new name, e.g. 'db/table' */
 	char*		errstr,		/*!< out: error string if != DB_SUCCESS
@@ -3602,9 +3615,10 @@ dict_stats_rename_table(
 	char		new_table_utf8[MAX_TABLE_UTF8_LEN];
 	dberr_t		ret;
 
-	ut_ad(!rw_lock_own(dict_operation_lock, RW_LOCK_X));
-	ut_ad(!mutex_own(&dict_sys->mutex));
-
+	if (!dict_locked) {
+		ut_ad(!rw_lock_own(dict_operation_lock, RW_LOCK_X));
+		ut_ad(!mutex_own(&dict_sys->mutex));
+	}
 	/* skip innodb_table_stats and innodb_index_stats themselves */
 	if (strcmp(old_name, TABLE_STATS_NAME) == 0
 	    || strcmp(old_name, INDEX_STATS_NAME) == 0
@@ -3620,9 +3634,10 @@ dict_stats_rename_table(
 	dict_fs2utf8(new_name, new_db_utf8, sizeof(new_db_utf8),
 		     new_table_utf8, sizeof(new_table_utf8));
 
-	rw_lock_x_lock(dict_operation_lock);
-	mutex_enter(&dict_sys->mutex);
-
+	if (!dict_locked) {
+		rw_lock_x_lock(dict_operation_lock);
+		mutex_enter(&dict_sys->mutex);
+	}
 	ulint	n_attempts = 0;
 	do {
 		n_attempts++;
@@ -3639,6 +3654,13 @@ dict_stats_rename_table(
 		if (ret == DB_STATS_DO_NOT_EXIST) {
 			ret = DB_SUCCESS;
 		}
+		DBUG_EXECUTE_IF("rename_stats",
+				mutex_exit(&dict_sys->mutex);
+				rw_lock_x_unlock(dict_operation_lock);
+				os_thread_sleep(20000000);
+				DEBUG_SYNC_C("rename_stats");
+				rw_lock_x_lock(dict_operation_lock);
+				mutex_enter(&dict_sys->mutex););
 
 		if (ret != DB_SUCCESS) {
 			mutex_exit(&dict_sys->mutex);
@@ -3708,9 +3730,10 @@ dict_stats_rename_table(
 		  || ret == DB_LOCK_WAIT_TIMEOUT)
 		 && n_attempts < 5);
 
-	mutex_exit(&dict_sys->mutex);
-	rw_lock_x_unlock(dict_operation_lock);
-
+	if(!dict_locked) {
+		mutex_exit(&dict_sys->mutex);
+		rw_lock_x_unlock(dict_operation_lock);
+	}
 	if (ret != DB_SUCCESS) {
 		ut_snprintf(errstr, errstr_sz,
 			    "Unable to rename statistics from"

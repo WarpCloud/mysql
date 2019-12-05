@@ -1,13 +1,20 @@
-%/* Copyright (c) 2010, 2016, Oracle and/or its affiliates. All rights reserved.
+%/* Copyright (c) 2010, 2018, Oracle and/or its affiliates. All rights reserved.
 %
 %   This program is free software; you can redistribute it and/or modify
-%   it under the terms of the GNU General Public License as published by
-%   the Free Software Foundation; version 2 of the License.
+%   it under the terms of the GNU General Public License, version 2.0,
+%   as published by the Free Software Foundation.
+%
+%   This program is also distributed with certain software (including
+%   but not limited to OpenSSL) that is licensed under separate terms,
+%   as designated in a particular file or component or in included license
+%   documentation.  The authors of MySQL hereby grant you an additional
+%   permission to link the program and your derivative works with the
+%   separately licensed software that they have included with MySQL.
 %
 %   This program is distributed in the hope that it will be useful,
 %   but WITHOUT ANY WARRANTY; without even the implied warranty of
 %   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-%   GNU General Public License for more details.
+%   GNU General Public License, version 2.0, for more details.
 %
 %   You should have received a copy of the GNU General Public License
 %   along with this program; if not, write to the Free Software
@@ -120,7 +127,8 @@ enum cargo_type {
   enable_arbitrator,
   disable_arbitrator,
   force_config_type,
-  x_terminate_and_exit
+  x_terminate_and_exit,
+  set_cache_limit
 };
 
 typedef node_no node_no_array<NSERVERS>;
@@ -180,6 +188,8 @@ union app_u switch(cargo_type c_t){
    trans_data td;
  case view_msg:
    node_set present;
+ case set_cache_limit:
+   uint64_t cache_limit;
  default:
    void;
 };
@@ -311,7 +321,7 @@ enum client_reply_code {
      REQUEST_RETRY
 };
 
-struct pax_msg{
+struct pax_msg_1_1{
   node_no to;             /* To node */
   node_no from;           /* From node */
   uint32_t group_id; /* Unique ID shared by our group */
@@ -325,12 +335,41 @@ struct pax_msg{
   bit_set *receivers;
   /* synode_no unique_id;  */   /* Local, unique ID used to see which message was sent */
   app_data *a;      /* Payload */
-  snapshot *snap;  	/* Snapshot if op == snapshot_op */
+  snapshot *snap;	/* Snapshot if op == snapshot_op */
   gcs_snapshot *gcs_snap; /* gcs_snapshot if op == gcs_snapshot_op */
   client_reply_code cli_err;
   bool force_delivery; /* Deliver this message even if we do not have majority */
   int32_t refcnt;
  };
+
+
+struct pax_msg_1_2{
+  node_no to;             /* To node */
+  node_no from;           /* From node */
+  uint32_t group_id; /* Unique ID shared by our group */
+  synode_no max_synode; /* Gossip about the max real synode */
+  start_t start_type; /* Boot or recovery? */
+  ballot reply_to;    /* Reply to which ballot */
+  ballot proposal;    /* Proposal number */
+  pax_op op;          /* Opcode: prepare, propose, learn, etc */
+  synode_no synode;   /* The message number */
+  pax_msg_type msg_type; /* normal, noop, or multi_noop */
+  bit_set *receivers;
+  /* synode_no unique_id;  */   /* Local, unique ID used to see which message was sent */
+  app_data *a;      /* Payload */
+  snapshot *snap;	/* Snapshot if op == snapshot_op */
+  gcs_snapshot *gcs_snap; /* gcs_snapshot if op == gcs_snapshot_op */
+  client_reply_code cli_err;
+  bool force_delivery; /* Deliver this message even if we do not have majority */
+  int32_t refcnt;
+  synode_no delivered_msg; /* Gossip about the last delivered message */
+ };
+
+%#ifndef PAX_MSG_TYPEDEF
+%#define PAX_MSG_TYPEDEF
+%typedef pax_msg_1_2 pax_msg;
+%extern  bool_t xdr_pax_msg (XDR *, pax_msg*);
+%#endif
 
 typedef string file_name<MAXFILENAME>;
 typedef file_name file_name_array<MAXFILENAMEARRAY>;

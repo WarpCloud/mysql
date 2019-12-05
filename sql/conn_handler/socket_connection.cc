@@ -2,13 +2,20 @@
    Copyright (c) 2013, 2017, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -100,6 +107,10 @@ void net_after_header_psi(struct st_net *net, void *user_data, size_t /* unused:
                                                   thd->db().length,
                                                   thd->charset(), NULL);
 
+      /*
+        Starts a new stage in performance schema, if compiled in and enabled.
+        Also sets THD::proc_info (used by SHOW PROCESSLIST, column STATE)
+      */
       THD_STAGE_INFO(thd, stage_starting);
     }
 
@@ -115,11 +126,11 @@ void net_after_header_psi(struct st_net *net, void *user_data, size_t /* unused:
 
 static void init_net_server_extension(THD *thd)
 {
-#ifdef HAVE_PSI_INTERFACE
   /* Start with a clean state for connection events. */
   thd->m_idle_psi= NULL;
   thd->m_statement_psi= NULL;
   thd->m_server_idle= false;
+
   /* Hook up the NET_SERVER callback in the net layer. */
   thd->m_net_server_extension.m_user_data= thd;
   thd->m_net_server_extension.m_before_header= net_before_header_psi;
@@ -128,9 +139,6 @@ static void init_net_server_extension(THD *thd)
   /* Activate this private extension for the mysqld server. */
   thd->get_protocol_classic()->get_net()->extension=
     &thd->m_net_server_extension;
-#else
-  thd->get_protocol_classic()->get_net()->extension= NULL;
-#endif
 }
 
 
@@ -963,12 +971,13 @@ Channel_info* Mysqld_socket_listener::listen_for_connection_event()
       if (req.sink)
         ((void (*)(int))req.sink)(req.fd);
 #endif
-      mysql_socket_shutdown(listen_sock, SHUT_RDWR);
-      mysql_socket_close(listen_sock);
       /*
         The connection was refused by TCP wrappers.
         There are no details (by client IP) available to update the host_cache.
       */
+      mysql_socket_shutdown(connect_sock, SHUT_RDWR);
+      mysql_socket_close(connect_sock);
+
       connection_errors_tcpwrap++;
       return NULL;
     }

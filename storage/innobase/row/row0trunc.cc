@@ -1,14 +1,22 @@
 /*****************************************************************************
 
-Copyright (c) 2013, 2017, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2013, 2018, Oracle and/or its affiliates. All Rights Reserved.
 
-This program is free software; you can redistribute it and/or modify it under
-the terms of the GNU General Public License as published by the Free Software
-Foundation; version 2 of the License.
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License, version 2.0,
+as published by the Free Software Foundation.
 
-This program is distributed in the hope that it will be useful, but WITHOUT
-ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
-FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+This program is also distributed with certain software (including
+but not limited to OpenSSL) that is licensed under separate terms,
+as designated in a particular file or component or in included license
+documentation.  The authors of MySQL hereby grant you an additional
+permission to link the program and your derivative works with the
+separately licensed software that they have included with MySQL.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License, version 2.0, for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
@@ -617,7 +625,7 @@ TruncateLogParser::scan(
 			}
 			memset(log_file_name, 0, sz);
 
-			strncpy(log_file_name, dir_path, dir_len);
+			memcpy(log_file_name, dir_path, dir_len);
 			ulint	log_file_name_len = strlen(log_file_name);
 			if (log_file_name[log_file_name_len - 1]
 				!= OS_PATH_SEPARATOR) {
@@ -1235,6 +1243,11 @@ row_truncate_complete(
 		table->memcached_sync_count = 0;
 	}
 
+	/* Add the table back to FTS optimize background thread. */
+	if (table->fts) {
+		fts_optimize_add_table(table);
+	}
+
 	row_mysql_unlock_data_dictionary(trx);
 
 	DEBUG_SYNC_C("ib_trunc_table_trunc_completing");
@@ -1580,6 +1593,9 @@ row_truncate_update_system_tables(
 
 		/* Reset the Doc ID in cache to 0 */
 		if (has_internal_doc_id && table->fts->cache != NULL) {
+			DBUG_EXECUTE_IF("ib_trunc_sleep_before_fts_cache_clear",
+					os_thread_sleep(10000000););
+
 			table->fts->fts_status |= TABLE_DICT_LOCKED;
 			fts_update_next_doc_id(trx, table, NULL, 0);
 			fts_cache_clear(table->fts->cache);
@@ -1838,6 +1854,13 @@ row_truncate_table_for_mysql(
 
 	/* Step-4: Stop all the background process associated with table. */
 	dict_stats_wait_bg_to_stop_using_table(table, trx);
+	if (table->fts) {
+		/* Remove from FTS optimize thread. Unlock is needed to allow
+		finishing background operations in progress. */
+		row_mysql_unlock_data_dictionary(trx);
+		fts_optimize_remove_table(table);
+		row_mysql_lock_data_dictionary(trx);
+	}
 
 	/* Step-5: There are few foreign key related constraint under which
 	we can't truncate table (due to referential integrity unless it is
@@ -2059,7 +2082,7 @@ row_truncate_table_for_mysql(
 			space_size -= ib_vector_size(table->fts->indexes);
 		}
 
-		fil_reinit_space_header(table->space, space_size, trx);
+		fil_reinit_space_header_for_table(table, space_size, trx);
 	}
 
 	DBUG_EXECUTE_IF("ib_trunc_crash_with_intermediate_log_checkpoint",

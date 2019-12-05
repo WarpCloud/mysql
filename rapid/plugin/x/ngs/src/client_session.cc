@@ -1,15 +1,21 @@
 /*
- * Copyright (c) 2015, 2016 Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; version 2 of the
- * License.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License, version 2.0,
+ * as published by the Free Software Foundation.
+ *
+ * This program is also distributed with certain software (including
+ * but not limited to OpenSSL) that is licensed under separate terms,
+ * as designated in a particular file or component or in included license
+ * documentation.  The authors of MySQL hereby grant you an additional
+ * permission to link the program and your derivative works with the
+ * separately licensed software that they have included with MySQL.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License, version 2.0, for more details.
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
@@ -212,9 +218,22 @@ void Session::on_auth_success(const Authentication_handler::Response &response)
 }
 
 
-void Session::on_auth_failure(const Authentication_handler::Response &responce)
+void Session::on_auth_failure(const Authentication_handler::Response &response)
 {
-  log_error("%s.%u: Unsuccessful login attempt: %s", m_client.client_id(), m_id, responce.data.c_str());
-  m_encoder->send_init_error(ngs::Fatal(ER_ACCESS_DENIED_ERROR, "%s", responce.data.c_str()));
+  int error_code = ER_ACCESS_DENIED_ERROR;
+
+  log_error("%s.%u: Unsuccessful login attempt: %s", m_client.client_id(), m_id, response.data.c_str());
+
+  if (can_forward_error_code_to_client(response.error_code))
+  {
+    error_code = response.error_code;
+  }
+
+  m_encoder->send_init_error(ngs::Fatal(error_code, "%s", response.data.c_str()));
   stop_auth();
+}
+
+bool Session::can_forward_error_code_to_client(const int error_code)
+{
+  return ER_DBACCESS_DENIED_ERROR == error_code;
 }

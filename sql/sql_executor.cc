@@ -1,13 +1,20 @@
-/* Copyright (c) 2000, 2016, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2000, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -624,12 +631,18 @@ end_sj_materialize(JOIN *join, QEP_TAB *qep_tab, bool end_of_records)
     if ((error= table->file->ha_write_row(table->record[0])))
     {
       /* create_ondisk_from_heap will generate error if needed */
-      if (!table->file->is_ignorable_error(error) &&
-          create_ondisk_from_heap(thd, table,
+      if (!table->file->is_ignorable_error(error))
+      {
+        if (create_ondisk_from_heap(thd, table,
                                   sjm->table_param.start_recinfo, 
                                   &sjm->table_param.recinfo, error,
                                   TRUE, NULL))
-        DBUG_RETURN(NESTED_LOOP_ERROR); /* purecov: inspected */
+          DBUG_RETURN(NESTED_LOOP_ERROR); /* purecov: inspected */
+        /* Initialize the index, since create_ondisk_from_heap does
+           not replicate the earlier index initialization */
+        if (table->hash_field)
+          table->file->ha_index_init(0, false);
+      }
     }
   }
   DBUG_RETURN(NESTED_LOOP_OK);
@@ -2130,6 +2143,18 @@ join_read_key_unlock_row(QEP_TAB *tab)
 }
 
 /**
+  Rows from const tables are read once but potentially used
+  multiple times during execution of a query.
+  Ensure such rows are never unlocked during query execution.
+*/
+
+void
+join_const_unlock_row(QEP_TAB *tab)
+{
+  DBUG_ASSERT(tab->type() == JT_CONST);
+}
+
+/**
   Read a table *assumed* to be included in execution of a pushed join.
   This is the counterpart of join_read_key() / join_read_always_key()
   for child tables in a pushed join.
@@ -2401,7 +2426,8 @@ join_init_quick_read_record(QEP_TAB *tab)
                                   HA_POS_ERROR,
                                   false,      // don't force quick range
                                   ORDER::ORDER_NOT_RELEVANT, tab,
-                                  tab->condition(), &needed_reg_dummy, &qck);
+                                  tab->condition(), &needed_reg_dummy, &qck,
+                                  tab->table()->force_index);
   DBUG_ASSERT(old_qck == NULL || old_qck != qck) ;
   tab->set_quick(qck);
 
@@ -2796,6 +2822,7 @@ void QEP_TAB::pick_table_access_method(const JOIN_TAB *join_tab)
   case JT_CONST:
     read_first_record= join_read_const;
     read_record.read_record= join_no_more_records;
+    read_record.unlock_row= join_const_unlock_row;
     break;
 
   case JT_EQ_REF:
@@ -3486,6 +3513,26 @@ end_update(JOIN *join, QEP_TAB *const qep_tab, bool end_of_records)
   init_tmptable_sum_functions(join->sum_funcs);
   if ((error=table->file->ha_write_row(table->record[0])))
   {
+    /*
+      If the error is HA_ERR_FOUND_DUPP_KEY and the grouping involves a
+      TIMESTAMP field, throw a meaningfull error to user with the actual
+      reason and the workaround. I.e, "Grouping on temporal is
+      non-deterministic for timezones having DST. Please consider switching
+      to UTC for this query". This is a temporary measure until we implement
+      WL#13148 (Do all internal handling TIMESTAMP in UTC timezone), which
+      will make such problem impossible.
+    */
+    if (error == HA_ERR_FOUND_DUPP_KEY)
+    {
+      for (group=table->group ; group ; group=group->next)
+      {
+        if (group->field->type() == MYSQL_TYPE_TIMESTAMP)
+        {
+          my_error(ER_GROUPING_ON_TIMESTAMP_IN_DST, MYF(0));
+          DBUG_RETURN(NESTED_LOOP_ERROR);
+        }
+      }
+    }
     if (create_ondisk_from_heap(join->thd, table,
                                 tmp_tbl->start_recinfo,
                                 &tmp_tbl->recinfo,

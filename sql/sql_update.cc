@@ -1,13 +1,20 @@
-/* Copyright (c) 2000, 2016, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2000, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software Foundation,
@@ -493,7 +500,8 @@ bool mysql_update(THD *thd,
       QUICK_SELECT_I *qck;
       impossible= test_quick_select(thd, keys_to_use, 0, limit, safe_update,
                                     ORDER::ORDER_NOT_RELEVANT, &qep_tab,
-                                    conds, &needed_reg_dummy, &qck) < 0;
+                                    conds, &needed_reg_dummy, &qck,
+                                    qep_tab.table()->force_index) < 0;
       qep_tab.set_quick(qck);
     }
     if (impossible)
@@ -531,12 +539,21 @@ bool mysql_update(THD *thd,
   /* If running in safe sql mode, don't allow updates without keys */
   if (table->quick_keys.is_clear_all())
   {
-    thd->server_status|=SERVER_QUERY_NO_INDEX_USED;
-    if (safe_update && !using_limit)
+    thd->server_status|= SERVER_QUERY_NO_INDEX_USED;
+
+    /*
+      No safe update error will be returned if:
+      1) Statement is an EXPLAIN OR
+      2) LIMIT is present.
+
+      Append the first warning (if any) to the error message. Allows the user
+      to understand why index access couldn't be chosen.
+    */
+    if (!thd->lex->is_explain() && safe_update && !using_limit)
     {
-      my_message(ER_UPDATE_WITHOUT_KEY_IN_SAFE_MODE,
-		 ER(ER_UPDATE_WITHOUT_KEY_IN_SAFE_MODE), MYF(0));
-      goto exit_without_my_ok;
+      my_error(ER_UPDATE_WITHOUT_KEY_IN_SAFE_MODE, MYF(0),
+               thd->get_stmt_da()->get_first_condition_message());
+      DBUG_RETURN(true);
     }
   }
   if (select_lex->has_ft_funcs() && init_ftfuncs(thd, select_lex))
@@ -644,15 +661,9 @@ bool mysql_update(THD *thd,
         */
         table->prepare_for_position();
 
-        IO_CACHE tempfile;
-        if (open_cached_file(&tempfile, mysql_tmpdir,TEMP_PREFIX,
-                             DISK_BUFFER_SIZE, MYF(MY_WME)))
-          goto exit_without_my_ok;
-
         /* If quick select is used, initialize it before retrieving rows. */
         if (qep_tab.quick() && (error= qep_tab.quick()->reset()))
         {
-          close_cached_file(&tempfile);
           if (table->file->is_fatal_error(error))
             error_flags|= ME_FATALERROR;
 
@@ -678,13 +689,21 @@ bool mysql_update(THD *thd,
           error= init_read_record_idx(&info, thd, table, 1, used_index, reverse);
 
         if (error)
-        {
-          close_cached_file(&tempfile); /* purecov: inspected */
           goto exit_without_my_ok;
-        }
 
         THD_STAGE_INFO(thd, stage_searching_rows_for_update);
         ha_rows tmp_limit= limit;
+
+        IO_CACHE *tempfile= (IO_CACHE*) my_malloc(key_memory_TABLE_sort_io_cache,
+                                                  sizeof(IO_CACHE),
+                                                  MYF(MY_FAE | MY_ZEROFILL));
+
+        if (open_cached_file(tempfile, mysql_tmpdir,TEMP_PREFIX,
+                             DISK_BUFFER_SIZE, MYF(MY_WME)))
+        {
+          my_free(tempfile);
+          goto exit_without_my_ok;
+        }
 
         while (!(error=info.read_record(&info)) && !thd->killed)
         {
@@ -705,7 +724,7 @@ bool mysql_update(THD *thd,
               continue;  /* repeat the read of the same row if it still exists */
 
             table->file->position(table->record[0]);
-            if (my_b_write(&tempfile,table->file->ref,
+            if (my_b_write(tempfile, table->file->ref,
                            table->file->ref_length))
             {
               error=1; /* purecov: inspected */
@@ -726,19 +745,16 @@ bool mysql_update(THD *thd,
         table->file->try_semi_consistent_read(0);
         end_read_record(&info);
         /* Change select to use tempfile */
-        if (reinit_io_cache(&tempfile,READ_CACHE,0L,0,0))
+        if (reinit_io_cache(tempfile, READ_CACHE, 0L, 0, 0))
           error=1; /* purecov: inspected */
-        // Read row ptrs from this file.
+
         DBUG_ASSERT(table->sort.io_cache == NULL);
-        table->sort.io_cache= (IO_CACHE*) my_malloc(key_memory_TABLE_sort_io_cache,
-                                                    sizeof(IO_CACHE),
-                                                    MYF(MY_FAE | MY_ZEROFILL));
         /*
           After this assignment, init_read_record() will run, and decide to
           read from sort.io_cache. This cache will be freed when qep_tab is
           destroyed.
          */
-        *table->sort.io_cache= tempfile;
+        table->sort.io_cache= tempfile;
         qep_tab.set_quick(NULL);
         qep_tab.set_condition(NULL);
         if (error >= 0)
@@ -811,9 +827,8 @@ bool mysql_update(THD *thd,
           continue;  /* repeat the read of the same row if it still exists */
 
         store_record(table,record[1]);
-        if (fill_record_n_invoke_before_triggers(thd, fields, values,
-                                                 table,
-                                                 TRG_EVENT_UPDATE, 0))
+        if (fill_record_n_invoke_before_triggers(thd, &update, fields, values,
+                                                 table, TRG_EVENT_UPDATE, 0))
           break; /* purecov: inspected */
 
         found++;
@@ -894,6 +909,18 @@ bool mysql_update(THD *thd,
             if (thd->is_error())
               break;
           }
+        }
+        else
+        {
+          /*
+             Some no operation dml statements do not go through SE.
+             In read_only mode, if a no operation dml is not marked as
+             read_write then binlogging cant be restricted for that statement.
+             To make binlogging be consistent in read_only mode,
+             if the no operation dml statement doesn't go through SE then mark
+             that statement as noop_read_write here.
+          */
+          table->file->mark_trx_noop_dml();
         }
 
         if (!error && table->triggers &&
@@ -2022,6 +2049,9 @@ bool Query_result_update::initialize_tables(JOIN *join)
     List<Item> temp_fields;
     ORDER     group;
     Temp_table_param *tmp_param;
+    if (table->vfield &&
+        validate_gc_assignment(thd, fields, values, table))
+      DBUG_RETURN(0);
 
     if (thd->lex->is_ignore())
       table->file->extra(HA_EXTRA_IGNORE_DUP_KEY);
@@ -2081,15 +2111,11 @@ bool Query_result_update::initialize_tables(JOIN *join)
       if (safe_update_on_fly(thd, join->best_ref[0], table_ref, all_tables))
       {
         table->mark_columns_needed_for_update(true/*mark_binlog_columns=true*/);
-	table_to_update= table;			// Update table on the fly
+        table_to_update= table;			// Update table on the fly
 	continue;
       }
     }
     table->mark_columns_needed_for_update(true/*mark_binlog_columns=true*/);
-
-    if (table->vfield &&
-        validate_gc_assignment(thd, fields, values, table))
-      DBUG_RETURN(0);
     /*
       enable uncacheable flag if we update a view with check option
       and check option has a subselect, otherwise, the check option
@@ -2270,7 +2296,7 @@ bool Query_result_update::send_data(List<Item> &not_used_values)
     {
       table->status|= STATUS_UPDATED;
       store_record(table,record[1]);
-      if (fill_record_n_invoke_before_triggers(thd,
+      if (fill_record_n_invoke_before_triggers(thd, update_operations[offset],
                                                *fields_for_table[offset],
                                                *values_for_table[offset],
                                                table,

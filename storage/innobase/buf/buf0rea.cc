@@ -2,13 +2,21 @@
 
 Copyright (c) 1995, 2017, Oracle and/or its affiliates. All Rights Reserved.
 
-This program is free software; you can redistribute it and/or modify it under
-the terms of the GNU General Public License as published by the Free Software
-Foundation; version 2 of the License.
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License, version 2.0,
+as published by the Free Software Foundation.
 
-This program is distributed in the hope that it will be useful, but WITHOUT
-ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
-FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+This program is also distributed with certain software (including
+but not limited to OpenSSL) that is licensed under separate terms,
+as designated in a particular file or component or in included license
+documentation.  The authors of MySQL hereby grant you an additional
+permission to link the program and your derivative works with the
+separately licensed software that they have included with MySQL.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License, version 2.0, for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
@@ -176,6 +184,18 @@ buf_read_page_low(
 		dst = ((buf_block_t*) bpage)->frame;
 	}
 
+	/* This debug code is only for 5.7. In trunk, with newDD,
+	the space->name is no longer same as table name. */
+	DBUG_EXECUTE_IF("innodb_invalid_read_after_truncate",
+		fil_space_t*	space = fil_space_get(page_id.space());
+
+		if (space != NULL && strcmp(space->name, "test/t1") == 0
+		    && page_id.page_no() == space->size - 1) {
+			type = IORequest::READ;
+			sync = true;
+		}
+	);
+
 	IORequest	request(type | IORequest::READ);
 
 	*err = fil_io(
@@ -293,8 +313,6 @@ buf_read_ahead_random(
 				size += os_file_get_size(node->handle)
 					/ page_size.physical();
 			}
-
-			ut_ad(size == space->size);
 		}
 #endif /* UNIV_DEBUG */
 
@@ -319,6 +337,19 @@ buf_read_ahead_random(
 	that is, reside near the start of the LRU list. */
 
 	for (i = low; i < high; i++) {
+		/* This debug code is only for 5.7. In trunk, with newDD,
+		the space->name is no longer same as table name. */
+		DBUG_EXECUTE_IF("innodb_invalid_read_after_truncate",
+			fil_space_t*	space = fil_space_get(page_id.space());
+
+			if (space != NULL
+			    && strcmp(space->name, "test/t1") == 0) {
+				high = space->size;
+				buf_pool_mutex_exit(buf_pool);
+				goto read_ahead;
+			}
+		);
+
 		const buf_page_t*	bpage = buf_page_hash_get(
 			buf_pool, page_id_t(page_id.space(), i));
 

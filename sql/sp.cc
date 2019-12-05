@@ -1,14 +1,21 @@
 /*
-   Copyright (c) 2002, 2016, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2002, 2018, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -356,7 +363,9 @@ private:
   bool silence_error;
 
 public:
-  Proc_table_intact() : m_print_once(TRUE), silence_error(FALSE) {}
+  Proc_table_intact() : m_print_once(TRUE), silence_error(FALSE)
+                      { has_keys= TRUE; }
+
   my_bool check_proc_table(TABLE *table);
 
 protected:
@@ -443,17 +452,9 @@ TABLE *open_proc_table_for_read(THD *thd, Open_tables_backup *backup)
   if (open_nontrans_system_tables_for_read(thd, &table, backup))
     DBUG_RETURN(NULL);
    
-  if (!table.table->key_info)
-  {
-    my_error(ER_TABLE_CORRUPT, MYF(0), table.table->s->db.str,
-             table.table->s->table_name.str);
-    goto err;
-  }
-
   if(!proc_table_intact.check_proc_table(table.table))
     DBUG_RETURN(table.table);
 
-err:
   close_nontrans_system_tables(thd, backup);
   DBUG_RETURN(NULL);
 }
@@ -972,8 +973,7 @@ sp_returns_type(THD *thd, String &result, sp_head *sp)
   TABLE table;
   TABLE_SHARE share;
   Field *field;
-  memset(&table, 0, sizeof(table));
-  memset(&share, 0, sizeof(share));
+
   table.in_use= thd;
   table.s = &share;
   field= sp->create_result_field(0, 0, &table);
@@ -2807,6 +2807,7 @@ String *sp_get_item_value(THD *thd, Item *item, String *str)
     if (item->field_type() != MYSQL_TYPE_BIT)
       return item->val_str(str);
     else {/* Bit type is handled as binary string */}
+    // Fall through
   case STRING_RESULT:
     {
       String *result= item->val_str(str);

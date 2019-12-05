@@ -1,13 +1,20 @@
-/* Copyright (c) 2014, 2016, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2014, 2018, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software Foundation,
@@ -24,35 +31,27 @@
 #include "plugin_psi.h"
 #include <mysql/group_replication_priv.h>
 
-/**
-  This method instructs all local transactions to rollback when certification is
-  no longer possible.
-*/
-void unblock_waiting_transactions();
+void log_primary_member_details();
 
-/**
-  This method creates a server session and connects to the server
-  to enable the read mode
+void abort_plugin_process(const char *message);
 
-  @param threaded   Shall the session create a new dedicated thread
+class Blocked_transaction_handler
+{
+public:
+  Blocked_transaction_handler();
+  virtual ~Blocked_transaction_handler();
 
-  @return the operation status
-    @retval 0      OK
-    @retval !=0    Error
-*/
-int set_server_read_mode(bool threaded);
+  /**
+    This method instructs all local transactions to rollback when certification is
+    no longer possible.
+  */
+  void unblock_waiting_transactions();
 
-/**
-  This method creates a server session and connects to the server
-  to reset the read mode
+private:
 
-  @param threaded   Shall the session create a new dedicated thread
-
-  @return the operation status
-    @retval 0      OK
-    @retval !=0    Error
-*/
-int reset_server_read_mode(bool threaded);
+  /* The lock that disallows concurrent method executions */
+  mysql_mutex_t unblocking_process_lock;
+};
 
 template <typename T>
 class Synchronized_queue

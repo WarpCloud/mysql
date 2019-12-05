@@ -1,14 +1,22 @@
 /*****************************************************************************
 
-Copyright (c) 1995, 2017, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1995, 2018, Oracle and/or its affiliates. All Rights Reserved.
 
-This program is free software; you can redistribute it and/or modify it under
-the terms of the GNU General Public License as published by the Free Software
-Foundation; version 2 of the License.
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License, version 2.0,
+as published by the Free Software Foundation.
 
-This program is distributed in the hope that it will be useful, but WITHOUT
-ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
-FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+This program is also distributed with certain software (including
+but not limited to OpenSSL) that is licensed under separate terms,
+as designated in a particular file or component or in included license
+documentation.  The authors of MySQL hereby grant you an additional
+permission to link the program and your derivative works with the
+separately licensed software that they have included with MySQL.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License, version 2.0, for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
@@ -259,6 +267,11 @@ struct fil_node_t {
 	the possible last incomplete megabyte may be ignored
 	if space->id == 0 */
 	ulint		size;
+
+	/** Size of the file when last flushed, used to force the flush when file
+	grows to keep the filesystem metadata synced when using O_DIRECT_NO_FSYNC */
+	ulint		flush_size;
+
 	/** initial size of the file in database pages;
 	FIL_IBD_FILE_INITIAL_SIZE by default */
 	ulint		init_size;
@@ -956,12 +969,12 @@ fil_prepare_for_truncate(
 
 /** Reinitialize the original tablespace header with the same space id
 for single tablespace
-@param[in]	id		space id of the tablespace
+@param[in]	table		table belongs to the tablespace
 @param[in]	size            size in blocks
 @param[in]	trx		Transaction covering truncate */
 void
-fil_reinit_space_header(
-	ulint		id,
+fil_reinit_space_header_for_table(
+	dict_table_t*	table,
 	ulint		size,
 	trx_t*		trx);
 

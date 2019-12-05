@@ -1,14 +1,21 @@
 /*
-   Copyright (c) 2005, 2015, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2005, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -1401,7 +1408,6 @@ void ha_partition::update_create_info(HA_CREATE_INFO *create_info)
   uint num_parts = num_subparts ? m_file_tot_parts / num_subparts
                                 : m_file_tot_parts;
   HA_CREATE_INFO dummy_info;
-  memset(&dummy_info, 0, sizeof(dummy_info));
 
   /*
   Since update_create_info() can be called from mysql_prepare_alter_table()
@@ -5552,6 +5558,21 @@ uint ha_partition::min_of_the_max_uint(
 }
 
 
+uint ha_partition::min_of_the_max_uint(HA_CREATE_INFO *create_info,
+                       uint (handler::*operator_func)(HA_CREATE_INFO *) const) const
+{
+  handler **file;
+  uint min_of_the_max= ((*m_file)->*operator_func)(create_info);
+
+  for (file= m_file+1; *file; file++)
+  {
+    uint tmp= ((*file)->*operator_func)(create_info);
+    set_if_smaller(min_of_the_max, tmp);
+  }
+  return min_of_the_max;
+}
+
+
 uint ha_partition::max_supported_key_parts() const
 {
   return min_of_the_max_uint(&handler::max_supported_key_parts);
@@ -5564,9 +5585,11 @@ uint ha_partition::max_supported_key_length() const
 }
 
 
-uint ha_partition::max_supported_key_part_length() const
+uint ha_partition::max_supported_key_part_length(HA_CREATE_INFO
+                                                 *create_info) const
 {
-  return min_of_the_max_uint(&handler::max_supported_key_part_length);
+  return
+  min_of_the_max_uint(create_info, &handler::max_supported_key_part_length);
 }
 
 
@@ -5879,6 +5902,15 @@ void ha_partition::get_auto_increment(ulonglong offset, ulonglong increment,
                                                      nb_reserved_values);
   }
   DBUG_VOID_RETURN;
+}
+
+/** Get partition row type
+@param[in] Id of partition for which row type to be retrieved
+@return Partition row type */
+enum row_type ha_partition::get_partition_row_type(
+        uint part_id)
+{
+	return m_file[part_id]->get_row_type();
 }
 
 void ha_partition::release_auto_increment_all_parts()

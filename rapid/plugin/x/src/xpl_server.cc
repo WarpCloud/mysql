@@ -1,15 +1,21 @@
 /*
- * Copyright (c) 2015, 2016 Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019 Oracle and/or its affiliates. All rights reserved.
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; version 2 of the
- * License.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License, version 2.0,
+ * as published by the Free Software Foundation.
+ *
+ * This program is also distributed with certain software (including
+ * but not limited to OpenSSL) that is licensed under separate terms,
+ * as designated in a particular file or component or in included license
+ * documentation.  The authors of MySQL hereby grant you an additional
+ * permission to link the program and your derivative works with the
+ * separately licensed software that they have included with MySQL.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License, version 2.0, for more details.
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
@@ -37,10 +43,7 @@
 #include "my_thread_local.h"
 #include "mysql/service_ssl_wrapper.h"
 #include "mysqlx_version.h"
-
-#if !defined(HAVE_YASSL)
 #include <openssl/err.h>
-#endif
 
 class Session_scheduler : public ngs::Scheduler_dynamic
 {
@@ -378,29 +381,6 @@ int xpl::Server::exit(MYSQL_PLUGIN p)
   return 0;
 }
 
-
-ngs::Error_code xpl::Server::let_mysqlx_user_verify_itself(Sql_data_context &context)
-{
-  try
-  {
-    context.switch_to_local_user(MYSQLXSYS_USER);
-
-    if (!context.is_acl_disabled())
-    {
-      verify_mysqlx_user_grants(context);
-    }
-
-    return ngs::Success();
-  }
-  catch (const ngs::Error_code &error)
-  {
-    if (ER_MUST_CHANGE_PASSWORD == error.error)
-      log_error("Password for %s account has been expired", MYSQLXSYS_ACCOUNT);
-
-    return error;
-  }
-}
-
 void xpl::Server::verify_mysqlx_user_grants(Sql_data_context &context)
 {
   Sql_data_result  sql_result(context);
@@ -427,7 +407,7 @@ void xpl::Server::verify_mysqlx_user_grants(Sql_data_context &context)
   {
     sql_result.get_next_field(grants);
     ++num_of_grants;
-    if (grants == "GRANT USAGE ON *.* TO '" MYSQLXSYS_USER "'@'" MYSQLXSYS_HOST "'")
+    if (grants == "GRANT USAGE ON *.* TO `" MYSQL_SESSION_USER "`@`" MYSQLXSYS_HOST "`")
       has_no_privileges = true;
 
     bool on_all_schemas = false;
@@ -474,49 +454,6 @@ void xpl::Server::verify_mysqlx_user_grants(Sql_data_context &context)
   throw ngs::Error(ER_X_BAD_CONFIGURATION, "%s account already exists but does not have the expected grants", MYSQLXSYS_ACCOUNT);
 }
 
-
-void xpl::Server::create_mysqlx_user(Sql_data_context &context)
-{
-  Sql_data_result sql_result(context);
-
-  try
-  {
-    context.switch_to_local_user("root");
-
-    sql_result.disable_binlog();
-
-    // pwd doesn't matter because the account is locked
-    sql_result.query("CREATE USER IF NOT EXISTS " MYSQLXSYS_ACCOUNT " IDENTIFIED WITH mysql_native_password AS '*7CF5CA9067EC647187EB99FCC27548FBE4839AE3' ACCOUNT LOCK;");
-
-    try
-    {
-      if (sql_result.statement_warn_count() > 0)
-        verify_mysqlx_user_grants(context);
-    }
-    catch (const ngs::Error_code &error)
-    {
-      if (ER_X_MYSQLX_ACCOUNT_MISSING_PERMISSIONS != error.error)
-        throw error;
-    }
-
-    sql_result.query("GRANT SELECT ON mysql.user TO " MYSQLXSYS_ACCOUNT);
-    sql_result.query("GRANT SUPER ON *.* TO " MYSQLXSYS_ACCOUNT);
-    sql_result.query("FLUSH PRIVILEGES;");
-
-    sql_result.restore_binlog();
-  }
-  catch (const ngs::Error_code &error)
-  {
-    sql_result.restore_binlog();
-
-    if (ER_MUST_CHANGE_PASSWORD != error.error)
-      throw error;
-
-    throw ngs::Error(ER_X_BAD_CONFIGURATION, "Can't setup %s account - root password expired", MYSQLXSYS_ACCOUNT);
-  }
-}
-
-
 void xpl::Server::net_thread()
 {
   srv_session_init_thread(xpl::plugin_handle);
@@ -532,7 +469,6 @@ void xpl::Server::net_thread()
     log_info("Server starts handling incoming connections");
     m_server.start();
     log_info("Stopped handling incoming connections");
-    on_net_shutdown();
   }
 
   ssl_wrapper_thread_cleanup();
@@ -584,12 +520,19 @@ bool xpl::Server::on_net_startup()
     if (error)
       throw error;
 
-    if (let_mysqlx_user_verify_itself(sql_context))
-      create_mysqlx_user(sql_context);
-
     Sql_data_result sql_result(sql_context);
-    sql_result.query("SELECT @@skip_networking, @@skip_name_resolve, @@have_ssl='YES', @@ssl_key, "
-                     "@@ssl_ca, @@ssl_capath, @@ssl_cert, @@ssl_cipher, @@ssl_crl, @@ssl_crlpath, @@tls_version;");
+    try {
+      sql_context.switch_to_local_user(MYSQL_SESSION_USER);
+      sql_result.query("SELECT @@skip_networking, @@skip_name_resolve, @@have_ssl='YES', @@ssl_key, "
+                       "@@ssl_ca, @@ssl_capath, @@ssl_cert, @@ssl_cipher, @@ssl_crl, @@ssl_crlpath, @@tls_version;");
+    } catch (const ngs::Error_code &error) {
+      log_error("Unable to use user mysql.session account when connecting"
+                "the server for internal plugin requests.");
+      log_info("For more information, please see the X Plugin User Account"
+               "section in the MySQL documentation");
+      throw;
+    }
+
 
     sql_context.detach();
 
@@ -619,9 +562,8 @@ bool xpl::Server::on_net_startup()
                                    ssl_config,
                                    xpl::Plugin_system_variables::ssl_config);
 
-    // YaSSL doesn't support CRL according to vio
-    const char *crl = IS_YASSL_OR_OPENSSL(NULL, ssl_config.ssl_crl);
-    const char *crlpath = IS_YASSL_OR_OPENSSL(NULL, ssl_config.ssl_crlpath);
+    const char *crl = ssl_config.ssl_crl;
+    const char *crlpath = ssl_config.ssl_crlpath;
 
     const bool ssl_setup_result = ssl_ctx->setup(tls_version, ssl_config.ssl_key,
                                                  ssl_config.ssl_ca,
@@ -633,7 +575,7 @@ bool xpl::Server::on_net_startup()
     if (ssl_setup_result)
     {
       my_plugin_log_message(&xpl::plugin_handle, MY_INFORMATION_LEVEL,
-          "Using " IS_YASSL_OR_OPENSSL("YaSSL", "OpenSSL") " for TLS connections");
+          "Using OpenSSL for TLS connections");
     }
     else
     {
@@ -659,48 +601,6 @@ bool xpl::Server::on_net_startup()
   instance->m_server.start_failed();
 
   return false;
-}
-
-
-void xpl::Server::on_net_shutdown()
-{
-  if (!mysqld::is_terminating())
-  {
-    try
-    {
-      Sql_data_context sql_context(NULL, true);
-
-      if (!sql_context.init())
-      {
-        Sql_data_result  sql_result(sql_context);
-
-        sql_context.switch_to_local_user("root");
-
-        sql_result.disable_binlog();
-
-        try
-        {
-          if (!sql_context.is_acl_disabled())
-            sql_result.query("DROP USER " MYSQLXSYS_ACCOUNT);
-          else
-            log_warning("Internal account %s can't be removed because server is running without user privileges (\"skip-grant-tables\" switch)", MYSQLXSYS_ACCOUNT);
-
-          sql_result.restore_binlog();
-        }
-        catch (const ngs::Error_code &error)
-        {
-          sql_result.restore_binlog();
-          throw error;
-        }
-
-        sql_context.detach();
-      }
-    }
-    catch (const ngs::Error_code &ec)
-    {
-      log_error("%s", ec.message.c_str());
-    }
-  }
 }
 
 ngs::Error_code xpl::Server::kill_client(uint64_t client_id, Session &requester)

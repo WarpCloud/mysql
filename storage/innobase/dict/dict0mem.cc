@@ -1,15 +1,23 @@
 /*****************************************************************************
 
-Copyright (c) 1996, 2016, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1996, 2019, Oracle and/or its affiliates. All Rights Reserved.
 Copyright (c) 2012, Facebook Inc.
 
-This program is free software; you can redistribute it and/or modify it under
-the terms of the GNU General Public License as published by the Free Software
-Foundation; version 2 of the License.
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License, version 2.0,
+as published by the Free Software Foundation.
 
-This program is distributed in the hope that it will be useful, but WITHOUT
-ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
-FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+This program is also distributed with certain software (including
+but not limited to OpenSSL) that is licensed under separate terms,
+as designated in a particular file or component or in included license
+documentation.  The authors of MySQL hereby grant you an additional
+permission to link the program and your derivative works with the
+separately licensed software that they have included with MySQL.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License, version 2.0, for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
@@ -227,6 +235,7 @@ dict_mem_table_free(
 	}
 
 	mem_heap_free(table->heap);
+        table = NULL;
 }
 
 /****************************************************************//**
@@ -475,11 +484,20 @@ dict_mem_table_col_rename_low(
 		char*	col_names;
 
 		if (to_len > from_len) {
+			ulint table_size_before_rename_col
+				= mem_heap_get_size(table->heap);
 			col_names = static_cast<char*>(
 				mem_heap_alloc(
 					table->heap,
 					full_len + to_len - from_len));
-
+			ulint table_size_after_rename_col
+				= mem_heap_get_size(table->heap);
+			if (table_size_before_rename_col
+				!= table_size_after_rename_col) {
+				dict_sys->size +=
+					table_size_after_rename_col
+						- table_size_before_rename_col;
+			}
 			memcpy(col_names, t_col_names, prefix_len);
 		} else {
 			col_names = const_cast<char*>(t_col_names);
@@ -613,6 +631,7 @@ dict_mem_table_col_rename(
 	/* This could fail if the data dictionaries are out of sync.
 	Proceed with the renaming anyway. */
 	ut_ad(!strcmp(from, s));
+
 
 	dict_mem_table_col_rename_low(table, static_cast<unsigned>(nth_col),
 				      to, s, is_virtual);
@@ -1013,6 +1032,7 @@ dict_mem_index_free(
 		UT_DELETE(index->rtr_track->rtr_active);
 	}
 
+	dict_index_remove_from_v_col_list(index);
 	mem_heap_free(index->heap);
 }
 

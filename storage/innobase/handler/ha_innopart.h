@@ -1,14 +1,22 @@
 /*****************************************************************************
 
-Copyright (c) 2014, 2017, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2014, 2019, Oracle and/or its affiliates. All Rights Reserved.
 
-This program is free software; you can redistribute it and/or modify it under
-the terms of the GNU General Public License as published by the Free Software
-Foundation; version 2 of the License.
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License, version 2.0,
+as published by the Free Software Foundation.
 
-This program is distributed in the hope that it will be useful, but WITHOUT
-ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
-FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+This program is also distributed with certain software (including
+but not limited to OpenSSL) that is licensed under separate terms,
+as designated in a particular file or component or in included license
+documentation.  The authors of MySQL hereby grant you an additional
+permission to link the program and your derivative works with the
+separately licensed software that they have included with MySQL.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License, version 2.0, for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
@@ -414,6 +422,12 @@ public:
 		ulonglong*	first_value,
 		ulonglong*	nb_reserved_values);
 
+
+	/** Get partition row type
+	@param[in] Id of partition for which row type to be retrieved
+	@return Partition row type */
+	enum row_type get_partition_row_type(uint part_id);
+
 	int
 	cmp_ref(
 		const uchar*	ref1,
@@ -438,13 +452,6 @@ public:
 		const uchar*	record)
 	{
 		Partition_helper::ph_position(record);
-	}
-
-	int
-	rnd_pos_by_record(
-		uchar*	record)
-	{
-		return(Partition_helper::ph_rnd_pos_by_record(record));
 	}
 
 	/* TODO: Implement these! */
@@ -1024,20 +1031,15 @@ private:
 		uchar*		ref,
 		const uchar*	record);
 
-	/** Read record by given record (by its PK) from the last used partition.
-	see handler::rnd_pos_by_record().
-	@param[in,out]	record	Record to position.
-	@return	0 or error number. */
+	/** Read row using position using given record to find.
+	Only useful when position is based on primary key
+	@param[in]	record  Current record in MySQL Row Format.
+	@return error number or 0. */
 	int
-	rnd_pos_by_record_in_last_part(
-		uchar*	record)
-	{
-		/* Not much overhead to use default function.
-		This avoids out-of-sync code. */
-		return(handler::rnd_pos_by_record(record));
-	}
+	rnd_pos_by_record(
+		uchar*  record);
 
-	/** Copy a cached MySQL record.
+        /** Copy a cached MySQL record.
 	@param[out]	to_record	Where to copy the MySQL record.
 	@param[in]	from_record	Which record to copy. */
 	void

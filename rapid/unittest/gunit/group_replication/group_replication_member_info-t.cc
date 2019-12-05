@@ -1,13 +1,20 @@
-/* Copyright (c) 2014, 2016, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2014, 2018, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -40,11 +47,13 @@ protected:
     uint port= 4444;
     uint plugin_version= 0x000400;
     uint write_set_algorithm= 1;
+    uint lower_case_table_names= 0;
     string executed_gtid("aaaa:1-10");
     string retrieved_gtid("bbbb:1-10");
     ulonglong gtid_assignment_block_size= 9223372036854775807ULL;
     bool in_primary_mode= false;
     bool has_enforces_update_everywhere_checks= false;
+    uint member_weight= 70;
 
     gcs_member_id= new Gcs_member_identifier("stuff");
 
@@ -59,7 +68,8 @@ protected:
                                       gtid_assignment_block_size,
                                       Group_member_info::MEMBER_ROLE_PRIMARY,
                                       in_primary_mode,
-                                      has_enforces_update_everywhere_checks);
+                                      has_enforces_update_everywhere_checks,
+                                      member_weight, lower_case_table_names);
     local_node->update_gtid_sets(executed_gtid,retrieved_gtid);
   }
 
@@ -103,6 +113,8 @@ TEST_F(ClusterMemberInfoTest, EncodeDecodeIdempotencyTest)
             decoded_local_node.get_gtid_assignment_block_size());
   ASSERT_EQ(local_node->get_role(),
             decoded_local_node.get_role());
+  ASSERT_EQ(local_node->get_member_weight(),
+            decoded_local_node.get_member_weight());
 
   delete encoded;
 }
@@ -118,11 +130,13 @@ protected:
     string uuid("8d7r947c-dr4a-17i3-59d1-f01faf1kkc44");
     uint port= 4444;
     uint write_set_algorithm= 1;
+    uint lower_case_table_names= 0;
     uint plugin_version= 0x000400;
     gcs_member_id= new Gcs_member_identifier("stuff");
     ulonglong gtid_assignment_block_size= 9223372036854775807ULL;
     bool in_primary_mode= false;
     bool has_enforces_update_everywhere_checks= false;
+    uint member_weight= 80;
 
     Group_member_info::Group_member_status status=
         Group_member_info::MEMBER_OFFLINE;
@@ -135,7 +149,8 @@ protected:
                                       gtid_assignment_block_size,
                                       Group_member_info::MEMBER_ROLE_SECONDARY,
                                       in_primary_mode,
-                                      has_enforces_update_everywhere_checks);
+                                      has_enforces_update_everywhere_checks,
+                                      member_weight, lower_case_table_names);
 
     cluster_member_mgr= new Group_member_info_manager(local_node);
   }
@@ -159,6 +174,7 @@ TEST_F(ClusterMemberInfoManagerTest, GetLocalInfoByUUIDTest)
   string uuid("781f947c-db4a-22e3-99d4-f01faf1a1c44");
   uint port= 4444;
   uint write_set_algorithm= 1;
+  uint lower_case_table_names= 0;
   uint plugin_version= 0x000400;
   Gcs_member_identifier gcs_member_id("another_stuff");
   string executed_gtid("aaaa:1-11");
@@ -166,6 +182,7 @@ TEST_F(ClusterMemberInfoManagerTest, GetLocalInfoByUUIDTest)
   ulonglong gtid_assignment_block_size= 9223372036854775807ULL;
   bool in_primary_mode= false;
   bool has_enforces_update_everywhere_checks= false;
+  uint member_weight= 90;
 
   Group_member_info::Group_member_status status=
       Group_member_info::MEMBER_OFFLINE;
@@ -181,7 +198,9 @@ TEST_F(ClusterMemberInfoManagerTest, GetLocalInfoByUUIDTest)
                                                        gtid_assignment_block_size,
                                                        Group_member_info::MEMBER_ROLE_PRIMARY,
                                                        in_primary_mode,
-                                                       has_enforces_update_everywhere_checks);
+                                                       has_enforces_update_everywhere_checks,
+                                                       member_weight,
+                                                       lower_case_table_names);
   new_member->update_gtid_sets(executed_gtid,retrieved_gtid);
 
   cluster_member_mgr->add(new_member);
@@ -262,6 +281,8 @@ TEST_F(ClusterMemberInfoManagerTest, GetLocalInfoByUUIDAfterEncodingTest)
             retrieved_local_info->get_gtid_assignment_block_size());
   ASSERT_EQ(local_node->get_role(),
             retrieved_local_info->get_role());
+  ASSERT_EQ(local_node->get_member_weight(),
+            retrieved_local_info->get_member_weight());
 
   delete retrieved_local_info;
 }
@@ -319,6 +340,7 @@ TEST_F(ClusterMemberInfoManagerTest, EncodeDecodeLargeSets)
   string uuid("781f947c-db4a-22e3-99d4-f01faf1a1c44");
   uint port= 4444;
   uint write_set_algorithm= 1;
+  uint lower_case_table_names= 0;
   uint plugin_version= 0x000400;
   Gcs_member_identifier gcs_member_id("another_stuff");
   string executed_gtid("aaaa:1-11:12-14:16-20:22-30");
@@ -327,6 +349,7 @@ TEST_F(ClusterMemberInfoManagerTest, EncodeDecodeLargeSets)
   ulonglong gtid_assignment_block_size= 9223372036854775807ULL;
   bool in_primary_mode= false;
   bool has_enforces_update_everywhere_checks= false;
+  uint member_weight= 40;
 
   Group_member_info::Group_member_status status=
       Group_member_info::MEMBER_OFFLINE;
@@ -342,7 +365,9 @@ TEST_F(ClusterMemberInfoManagerTest, EncodeDecodeLargeSets)
                                                        gtid_assignment_block_size,
                                                        Group_member_info::MEMBER_ROLE_PRIMARY,
                                                        in_primary_mode,
-                                                       has_enforces_update_everywhere_checks);
+                                                       has_enforces_update_everywhere_checks,
+                                                       member_weight,
+                                                       lower_case_table_names);
   new_member->update_gtid_sets(executed_gtid,retrieved_gtid);
 
   cluster_member_mgr->add(new_member);
@@ -413,6 +438,10 @@ TEST_F(ClusterMemberInfoManagerTest, EncodeDecodeLargeSets)
             retrieved_local_info->get_gtid_assignment_block_size());
   ASSERT_EQ(local_node->get_role(),
             retrieved_local_info->get_role());
+  ASSERT_EQ(local_node->get_member_weight(),
+            retrieved_local_info->get_member_weight());
+  ASSERT_EQ(local_node->get_lower_case_table_names(),
+            retrieved_local_info->get_lower_case_table_names());
 
   delete retrieved_local_info;
 }

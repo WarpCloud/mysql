@@ -1,14 +1,21 @@
 /*
-   Copyright (c) 2000, 2016, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2000, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -28,9 +35,16 @@
 */
 
 /* May include caustic 3rd-party defs. Use early, so it can override nothing. */
-#include "sha2.h"
+#include <openssl/sha.h>
 
 #include "item_strfunc.h"
+
+#ifdef HAVE_UNISTD_H
+#include <unistd.h>
+#endif
+#ifdef HAVE_CRYPT_H
+#include <crypt.h>
+#endif
 
 #include "base64.h"                  // base64_encode_max_arg_length
 #include "my_aes.h"                  // MY_AES_IV_SIZE
@@ -239,9 +253,9 @@ String *Item_func_sha2::val_str_ascii(String *str)
   unsigned char digest_buf[SHA512_DIGEST_LENGTH];
   uint digest_length= 0;
 
+  String *input_string= args[0]->val_str(str);
   str->set_charset(&my_charset_bin);
 
-  String *input_string= args[0]->val_str(str);
   if (input_string == NULL)
   {
     null_value= TRUE;
@@ -2159,6 +2173,12 @@ static size_t calculate_password(String *str, char *buffer)
 #if defined(HAVE_OPENSSL)
   if (old_passwords == 2)
   {
+    if (str->length() > MAX_PLAINTEXT_LENGTH)
+    {
+      my_error(ER_NOT_VALID_PASSWORD, MYF(0));
+      return 0;
+    }
+
     my_make_scrambled_password(buffer, str->ptr(),
                                str->length());
     buffer_len= strlen(buffer) + 1;
@@ -2224,31 +2244,6 @@ String *Item_func_password::val_str_ascii(String *str)
            default_charset());
 
   return str;
-}
-
-char *Item_func_password::
-  create_password_hash_buffer(THD *thd, const char *password,  size_t pass_len)
-{
-  String *password_str= new (thd->mem_root)String(password, thd->variables.
-                                                    character_set_client);
-  my_validate_password_policy(password_str->ptr(), password_str->length());
-
-  char *buff= NULL;
-  if (thd->variables.old_passwords == 0)
-  {
-    /* Allocate memory for the password scramble and one extra byte for \0 */
-    buff= (char *) thd->alloc(SCRAMBLED_PASSWORD_CHAR_LENGTH + 1);
-    my_make_scrambled_password_sha1(buff, password, pass_len);
-  }
-#if defined(HAVE_OPENSSL)
-  else
-  {
-    /* Allocate memory for the password scramble and one extra byte for \0 */
-    buff= (char *) thd->alloc(CRYPT_MAX_PASSWORD_SIZE + 1);
-    my_make_scrambled_password(buff, password, pass_len);
-  }
-#endif
-  return buff;
 }
 
 bool Item_func_encrypt::itemize(Parse_context *pc, Item **res)
@@ -2510,14 +2505,6 @@ bool Item_func_current_user::fix_fields(THD *thd, Item **ref)
                          thd->security_context();
 #endif /*NO_EMBEDDED_ACCESS_CHECKS*/
   return init(ctx->priv_user().str, ctx->priv_host().str);
-}
-
-
-bool Item_func_priv_user::fix_fields(THD *thd, Item **ref)
-{
-  return (Item_func_sysconst::fix_fields(thd, ref) ||
-          init(thd->m_main_security_ctx.priv_user().str,
-               thd->m_main_security_ctx.priv_host().str));
 }
 
 
@@ -3206,14 +3193,15 @@ String *Item_func_format::val_str_ascii(String *str)
       str_length >= dec_length + 1 + lc->grouping[0])
   {
     /* We need space for ',' between each group of digits as well. */
-    char buf[2 * FLOATING_POINT_BUFFER];
+    char buf[2 * FLOATING_POINT_BUFFER + 2] = {0};
     int count;
     const char *grouping= lc->grouping;
     char sign_length= *str->ptr() == '-' ? 1 : 0;
     const char *src= str->ptr() + str_length - dec_length - 1;
     const char *src_begin= str->ptr() + sign_length;
-    char *dst= buf + sizeof(buf);
-    
+    char *dst= buf + 2 * FLOATING_POINT_BUFFER;
+    char *start_dst = dst;
+
     /* Put the fractional part */
     if (dec)
     {
@@ -3245,7 +3233,8 @@ String *Item_func_format::val_str_ascii(String *str)
       *--dst= *str->ptr();
     
     /* Put the rest of the integer part without grouping */
-    str->copy(dst, buf + sizeof(buf) - dst, &my_charset_latin1);
+    size_t result_length = start_dst - dst;
+    str->copy(dst, result_length, &my_charset_latin1);
   }
   else if (dec_length && lc->decimal_point != '.')
   {
@@ -3726,6 +3715,7 @@ String *Item_func_rpad::val_str(String *str)
   char *to;
   /* must be longlong to avoid truncation */
   longlong count= args[1]->val_int();
+  /* Avoid modifying this string as it may affect args[0] */
   String *res= args[0]->val_str(str);
   String *rpad= args[2]->val_str(&rpad_str);
 
@@ -3769,10 +3759,15 @@ String *Item_func_rpad::val_str(String *str)
 
   const size_t res_char_length= res->numchars();
 
+  // String to pad is big enough
   if (count <= static_cast<longlong>(res_char_length))
-  {						// String to pad is big enough
-    res->length(res->charpos((int) count));	// Shorten result if longer
-    return (res);
+  {
+    int res_charpos= res->charpos((int)count);
+    if (tmp_value.alloc(res_charpos))
+      return NULL;
+    (void)tmp_value.copy(*res);
+    tmp_value.length(res_charpos); // Shorten result if longer
+    return &tmp_value;
   }
   const size_t pad_char_length= rpad->numchars();
 
@@ -3794,6 +3789,10 @@ String *Item_func_rpad::val_str(String *str)
   }
   /* Must be done before alloc_buffer */
   const size_t res_byte_length= res->length();
+  /*
+    alloc_buffer() doesn't modify 'res' because 'res' is guaranteed too short
+    at this stage.
+  */
   if (!(res= alloc_buffer(res, str, &tmp_value,
                           static_cast<size_t>(byte_count))))
   {
@@ -3854,6 +3853,7 @@ String *Item_func_lpad::val_str(String *str)
   /* must be longlong to avoid truncation */
   longlong count= args[1]->val_int();
   size_t byte_count;
+  /* Avoid modifying this string as it may affect args[0] */
   String *res= args[0]->val_str(&tmp_value);
   String *pad= args[2]->val_str(&lpad_str);
 
@@ -3894,8 +3894,12 @@ String *Item_func_lpad::val_str(String *str)
 
   if (count <= static_cast<longlong>(res_char_length))
   {
-    res->length(res->charpos((int) count));
-    return res;
+    int res_charpos= res->charpos((int)count);
+   if (tmp_value.alloc(res_charpos))
+     return NULL;
+   (void)tmp_value.copy(*res);
+   tmp_value.length(res_charpos); // Shorten result if longer
+   return &tmp_value;
   }
   
   pad_char_length= pad->numchars();
@@ -4995,7 +4999,6 @@ longlong Item_func_crc32::val_int()
 
 #ifdef HAVE_COMPRESS
 #include "zlib.h"
-#include "../regex/my_regex.h"
 
 String *Item_func_compress::val_str(String *str)
 {
@@ -5343,182 +5346,4 @@ String *Item_func_gtid_subtract::val_str_ascii(String *str)
   }
   null_value= true;
   DBUG_RETURN(NULL);
-}
-
-/**
-  @brief Compile regular expression.
-
-  @param[in]    send_error     send error message if any.
-
-  @details Make necessary character set conversion then
-  compile regular expression passed in the args[1].
-
-  @retval    0     success.
-  @retval    1     error occurred.
-  @retval   -1     given null regular expression.
- */
-
-int Item_func_regexp_substr::regcomp(bool send_error)
-{
-  char buff[MAX_FIELD_WIDTH];
-  String tmp(buff,sizeof(buff),&my_charset_bin);
-  String *res= args[1]->val_str(&tmp);
-  int error;
-
-  if (args[1]->null_value)
-    return -1;
-
-  if (regex_compiled)
-  {
-    if (!stringcmp(res, &prev_regexp))
-      return 0;
-    prev_regexp.copy(*res);
-    my_regfree(&preg);
-    regex_compiled= 0;
-  }
-
-  if (cmp_collation.collation != regex_lib_charset)
-  {
-    /* Convert UCS2 strings to UTF8 */
-    uint dummy_errors;
-    if (conv.copy(res->ptr(), res->length(), res->charset(),
-                  regex_lib_charset, &dummy_errors))
-      return 1;
-    res= &conv;
-  }
-
-  if ((error= my_regcomp(&preg, res->c_ptr_safe(),
-                         regex_lib_flags, regex_lib_charset)))
-  {
-    if (send_error)
-    {
-      (void) my_regerror(error, &preg, buff, sizeof(buff));
-      my_error(ER_REGEXP_ERROR, MYF(0), buff);
-    }
-    return 1;
-  }
-  regex_compiled= 1;
-  return 0;
-}
-
-
-bool
-Item_func_regexp_substr::fix_fields(THD *thd, Item **ref)
-{
-  DBUG_ASSERT(fixed == 0);
-
-  Disable_semijoin_flattening DSF(thd->lex->current_select(), true);
-
-  if ((!args[0]->fixed &&
-       args[0]->fix_fields(thd, args)) || args[0]->check_cols(1) ||
-      (!args[1]->fixed &&
-       args[1]->fix_fields(thd, args + 1)) || args[1]->check_cols(1))
-    return TRUE;				/* purecov: inspected */
-  with_sum_func=args[0]->with_sum_func || args[1]->with_sum_func;
-  with_subselect= args[0]->has_subquery() || args[1]->has_subquery();
-  with_stored_program= args[0]->has_stored_program() ||
-                       args[1]->has_stored_program();
-  max_length= 1;
-  decimals= 0;
-
-  if (agg_arg_charsets_for_comparison(cmp_collation, args, 2))
-    return TRUE;
-
-  regex_lib_flags= (cmp_collation.collation->state &
-                    (MY_CS_BINSORT | MY_CS_CSSORT)) ?
-                   MY_REG_EXTENDED :
-                   MY_REG_EXTENDED | MY_REG_ICASE;
-  /*
-    If the case of UCS2 and other non-ASCII character sets,
-    we will convert patterns and strings to UTF8.
-  */
-  regex_lib_charset= (cmp_collation.collation->mbminlen > 1) ?
-                     &my_charset_utf8_general_ci :
-                     cmp_collation.collation;
-
-  used_tables_cache=args[0]->used_tables() | args[1]->used_tables();
-  not_null_tables_cache= (args[0]->not_null_tables() |
-			  args[1]->not_null_tables());
-  const_item_cache=args[0]->const_item() && args[1]->const_item();
-  if (!regex_compiled && args[1]->const_item())
-  {
-    int comp_res= regcomp(TRUE);
-    if (comp_res == -1)
-    {						// Will always return NULL
-      maybe_null=1;
-      fixed= 1;
-      return FALSE;
-    }
-    else if (comp_res)
-      return TRUE;
-    regex_is_const= 1;
-    maybe_null= args[0]->maybe_null;
-  }
-  else
-    maybe_null=1;
-  fixed= 1;
-  return FALSE;
-}
-
-
-String* Item_func_regexp_substr::val_str(String *str)
-{
-  DBUG_ASSERT(fixed == 1);
-  char buff[MAX_FIELD_WIDTH];
-  int matched = 0;
-  my_regmatch_t match_result[1];
-  match_result[0].rm_so = -1;
-  match_result[0].rm_eo = -1;
-  String tmp(buff,sizeof(buff),&my_charset_bin);
-  String *res= args[0]->val_str(&tmp);
-
-  if ((null_value= (args[0]->null_value ||
-                    (!regex_is_const && regcomp(FALSE)))))
-      goto err;
-
-  str->length(0);
-  str->set_charset(collation.collation);
-  if (cmp_collation.collation != regex_lib_charset)
-  {
-    /* Convert UCS2 strings to UTF8 */
-    uint dummy_errors;
-    if (conv.copy(res->ptr(), res->length(), res->charset(),
-                  regex_lib_charset, &dummy_errors))
-    {
-        goto err;
-    }
-    res= &conv;
-  }
-  matched =  my_regexec(&preg,res->c_ptr_safe(),1,match_result,0) ? 0 : 1;
-  if (matched && match_result[0].rm_so != -1) {
-    if (str->append(res->ptr() + match_result[0].rm_so, match_result[0].rm_eo - match_result[0].rm_so)) {
-      goto err;
-    }
-    return str;
-  } else {
-    return str;
-  }
-err:
-  null_value = true;
-  return 0;
-}
-
-
-void Item_func_regexp_substr::cleanup()
-{
-  DBUG_ENTER("Item_func_regex_substr::cleanup");
-  Item_str_func::cleanup();
-  if (regex_compiled)
-  {
-    my_regfree(&preg);
-    regex_compiled=0;
-    prev_regexp.length(0);
-  }
-  DBUG_VOID_RETURN;
-}
-
-void Item_func_regexp_substr::fix_length_and_dec()
-{
-  max_length=args[0]->max_length;
-  agg_arg_charsets_for_string_result(collation, args, 1);
 }

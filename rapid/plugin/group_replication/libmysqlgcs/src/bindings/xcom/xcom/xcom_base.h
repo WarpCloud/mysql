@@ -1,13 +1,20 @@
-/* Copyright (c) 2012, 2016, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -157,7 +164,7 @@ void xcom_add_node(char *addr, xcom_port port, node_list *nl);
 xcom_state xcom_fsm(xcom_actions action, task_arg fsmargs);
 void site_post_install_action(site_def *site);
 
-void site_install_action(site_def *site);
+void site_install_action(site_def *site, cargo_type operation);
 void send_client_add_node(char *srv, xcom_port port, node_list *nl);
 void send_client_remove_node(char *srv, xcom_port port, node_list *nl);
 
@@ -186,12 +193,16 @@ typedef void (*xcom_state_change_cb)(int status);
 void set_xcom_run_cb(xcom_state_change_cb x);
 void set_xcom_terminate_cb(xcom_state_change_cb x);
 void set_xcom_exit_cb(xcom_state_change_cb x);
+void set_xcom_expel_cb(xcom_state_change_cb x);
+
+app_data_ptr init_config_with_group(app_data *a, node_list *nl, cargo_type type,
+                                    uint32_t group_id);
 
 /*
  Registers a callback that is called right after
  the accept routine returns.
  */
-typedef int (*xcom_socket_accept_cb)(int fd);
+typedef int (*xcom_socket_accept_cb)(int fd, site_def const *xcom_config);
 int set_xcom_socket_accept_cb(xcom_socket_accept_cb x);
 
 connection_descriptor *xcom_open_client_connection(char *server,
@@ -215,14 +226,43 @@ int xcom_client_remove_node(connection_descriptor* fd, node_list *nl,
 int64_t xcom_client_send_data(uint32_t size, char *data,
                               connection_descriptor* fd);
 int	xcom_client_terminate_and_exit(connection_descriptor* fd);
+int	xcom_client_set_cache_limit(connection_descriptor *fd, uint64_t cache_limit);
+
+/**
+  Copies app data @c source into @c target and checks if the copy
+  succeeded. Sets *target to NULL if the copy fails.
+
+  @param[in, out] target The pax_msg to which the app_data will be copied.
+  @param source The app data that will be copied.
+  @retval TRUE if the copy was successful.
+  @retval FALSE if the copy failed, in which case *target is set to NULL;
+          a failed copy means that there was an error allocating memory for
+          the copy.
+*/
+bool_t safe_app_data_copy(pax_msg **target, app_data_ptr source);
+
+static inline char *strerr_msg(char *buf, size_t len, int nr)
+{
+#if defined (WIN32) || defined (WIN64)
+  strerror_s(buf, len, nr);
+#else
+  snprintf(buf, len, "%s", strerror(nr));
+#endif
+  return buf;
+}
 
 #define XCOM_COMMS_ERROR 1
+#define XCOM_COMMS_OTHER 2
 #define XCOM_COMMS_OK 0
 void set_xcom_comms_cb(xcom_state_change_cb x);
 
 synode_no get_delivered_msg();
 
-#define XCOM_FSM(action, arg) do {const char *s = xcom_state_name[xcom_fsm(action,arg)]; G_TRACE("%f %s:%d", seconds(), __FILE__, __LINE__); G_MESSAGE("new state %s",s);} while(0)
+#ifdef WITH_LOG_DEBUG
+#define XCOM_FSM(action, arg) do {const char *s = xcom_state_name[xcom_fsm(action,arg)]; G_TRACE("%f %s:%d", seconds(), __FILE__, __LINE__); G_DEBUG("new state %s",s);} while(0)
+#else
+#define XCOM_FSM(action, arg) do {xcom_fsm(action,arg);} while(0)
+#endif
 
 #ifdef __cplusplus
 }

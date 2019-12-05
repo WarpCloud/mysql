@@ -1,14 +1,21 @@
 /*
-   Copyright (c) 2000, 2015, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2000, 2018, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -2172,17 +2179,6 @@ protected:
   virtual ~Create_func_instr() {}
 };
 
-class Create_func_regexp_substr : public Create_func_arg2
-{
-public:
-    virtual Item *create(THD *thd, Item *arg1, Item *arg2);
-
-    static Create_func_regexp_substr s_singleton;
-
-protected:
-    Create_func_regexp_substr() {}
-    virtual ~Create_func_regexp_substr() {}
-};
 
 class Create_func_interiorringn : public Create_func_arg2
 {
@@ -2494,6 +2490,17 @@ protected:
   virtual ~Create_func_json_depth() {}
 };
 
+class Create_func_json_pretty : public Create_func_arg1
+{
+public:
+  static Create_func_json_pretty s_singleton;
+  virtual Item *create(THD *thd, Item *arg1)
+  {
+    return new (thd->mem_root) Item_func_json_pretty(POS(), arg1);
+  }
+};
+Create_func_json_pretty Create_func_json_pretty::s_singleton;
+
 class Create_func_json_type : public Create_func_arg1
 {
 public:
@@ -2693,19 +2700,52 @@ public:
 };
 Create_func_issimple_deprecated Create_func_issimple_deprecated::s_singleton;
 
-
-class Create_func_json_merge : public Create_native_func
+class Create_func_json_merge_patch : public Create_native_func
 {
 public:
   virtual Item *create_native(THD *thd, LEX_STRING name,
                               PT_item_list *item_list);
 
-  static Create_func_json_merge s_singleton;
+  static Create_func_json_merge_patch s_singleton;
+};
+Create_func_json_merge_patch Create_func_json_merge_patch::s_singleton;
+
+class Create_func_json_merge_preserve : public Create_native_func
+{
+public:
+  virtual Item *create_native(THD *thd, LEX_STRING name,
+                              PT_item_list *item_list);
+
+  static Create_func_json_merge_preserve s_singleton;
 
 protected:
-  Create_func_json_merge() {}
-  virtual ~Create_func_json_merge() {}
+  Create_func_json_merge_preserve() {}
+  virtual ~Create_func_json_merge_preserve() {}
 };
+Create_func_json_merge_preserve Create_func_json_merge_preserve::s_singleton;
+
+class Create_func_json_merge : public Create_func_json_merge_preserve
+{
+public:
+  static Create_func_json_merge s_singleton;
+  virtual Item *create_native(THD *thd, LEX_STRING name,
+                              PT_item_list *item_list)
+  {
+    Item *func= Create_func_json_merge_preserve::create_native(thd, name,
+                                                               item_list);
+    /*
+      JSON_MERGE is a deprecated alias for JSON_MERGE_PRESERVE. Warn
+      the users and recommend that they specify explicitly what kind
+      of merge operation they want.
+    */
+    if (func != NULL)
+      push_deprecated_warn(thd, "JSON_MERGE",
+                           "JSON_MERGE_PRESERVE/JSON_MERGE_PATCH");
+
+    return func;
+  }
+};
+Create_func_json_merge Create_func_json_merge::s_singleton;
 
 class Create_func_json_quote : public Create_native_func
 {
@@ -2719,6 +2759,17 @@ protected:
   Create_func_json_quote() {}
   virtual ~Create_func_json_quote() {}
 };
+
+class Create_func_json_storage_size : public Create_func_arg1
+{
+public:
+  static Create_func_json_storage_size s_singleton;
+  virtual Item *create(THD *thd, Item *arg1)
+  {
+    return new (thd->mem_root) Item_func_json_storage_size(POS(), arg1);
+  }
+};
+Create_func_json_storage_size Create_func_json_storage_size::s_singleton;
 
 class Create_func_json_unquote : public Create_native_func
 {
@@ -3340,20 +3391,6 @@ public:
 protected:
   Create_func_pow() {}
   virtual ~Create_func_pow() {}
-};
-
-
-class Create_func_priv_user : public Create_native_func
-{
-public:
-    virtual Item *create_native(THD *thd, LEX_STRING name,
-                                PT_item_list *item_list);
-
-    static Create_func_priv_user s_singleton;
-
-protected:
-    Create_func_priv_user() {}
-    virtual ~Create_func_priv_user() {}
 };
 
 
@@ -4129,7 +4166,11 @@ protected:
 Item*
 Create_qfunc::create_func(THD *thd, LEX_STRING name, PT_item_list *item_list)
 {
-  return create(thd, NULL_STR, name, false, item_list);
+  LEX_STRING db= NULL_STR;
+  if (thd->lex->copy_db_to(&db.str, &db.length))
+    return NULL;
+
+  return create(thd, db, name, false, item_list);
 }
 
 
@@ -5570,13 +5611,6 @@ Create_func_instr::create(THD *thd, Item *arg1, Item *arg2)
   return new (thd->mem_root) Item_func_instr(POS(), arg1, arg2);
 }
 
-Create_func_regexp_substr Create_func_regexp_substr::s_singleton;
-
-Item*
-Create_func_regexp_substr::create(THD *thd, Item *arg1, Item *arg2)
-{
-  return new (thd->mem_root) Item_func_regexp_substr(POS(), arg1, arg2);
-}
 
 Create_func_interiorringn Create_func_interiorringn::s_singleton;
 
@@ -6160,12 +6194,19 @@ Create_func_validate::create(THD *thd, Item *arg1)
   return new (thd->mem_root) Item_func_validate(POS(), arg1);
 }
 
-
-Create_func_json_merge Create_func_json_merge::s_singleton;
+Item*
+Create_func_json_merge_patch::create_native(THD *thd, LEX_STRING name,
+                                            PT_item_list *item_list)
+{
+  int arg_count= item_list ? item_list->elements() : 0;
+  if (arg_count < 2)
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+  return new (thd->mem_root) Item_func_json_merge_patch(thd, POS(), item_list);
+}
 
 Item*
-Create_func_json_merge::create_native(THD *thd, LEX_STRING name,
-                                     PT_item_list *item_list)
+Create_func_json_merge_preserve::create_native(THD *thd, LEX_STRING name,
+                                               PT_item_list *item_list)
 {
   Item* func= NULL;
   int arg_count= 0;
@@ -6181,7 +6222,8 @@ Create_func_json_merge::create_native(THD *thd, LEX_STRING name,
   }
   else
   {
-    func= new (thd->mem_root) Item_func_json_merge(thd, POS(), item_list);
+    func= new (thd->mem_root) Item_func_json_merge_preserve(thd, POS(),
+                                                            item_list);
   }
 
   return func;
@@ -6837,16 +6879,6 @@ Item*
 Create_func_pow::create(THD *thd, Item *arg1, Item *arg2)
 {
   return new (thd->mem_root) Item_func_pow(POS(), arg1, arg2);
-}
-
-
-Create_func_priv_user Create_func_priv_user::s_singleton;
-
-Item *
-Create_func_priv_user::create_native(THD *thd, LEX_STRING name,
-                                     PT_item_list *item_list)
-{
-  return new (thd->mem_root) Item_func_priv_user(POS());
 }
 
 
@@ -7557,7 +7589,6 @@ static Native_func_registry func_array[] =
   { { C_STRING_WITH_LEN("IS_IPV4_COMPAT") }, BUILDER(Create_func_is_ipv4_compat)},
   { { C_STRING_WITH_LEN("IS_IPV4_MAPPED") }, BUILDER(Create_func_is_ipv4_mapped)},
   { { C_STRING_WITH_LEN("INSTR") }, BUILDER(Create_func_instr)},
-  { { C_STRING_WITH_LEN("REGEXP_SUBSTR") }, BUILDER(Create_func_regexp_substr)},
   { { C_STRING_WITH_LEN("INTERIORRINGN") }, GEOM_BUILDER(Create_func_interiorringn_deprecated)},
   { { C_STRING_WITH_LEN("INTERSECTS") }, GEOM_BUILDER(Create_func_intersects_deprecated)},
   { { C_STRING_WITH_LEN("ISCLOSED") }, GEOM_BUILDER(Create_func_isclosed_deprecated)},
@@ -7569,6 +7600,7 @@ static Native_func_registry func_array[] =
   { { C_STRING_WITH_LEN("JSON_CONTAINS_PATH") }, BUILDER(Create_func_json_contains_path)},
   { { C_STRING_WITH_LEN("JSON_LENGTH") }, BUILDER(Create_func_json_length)},
   { { C_STRING_WITH_LEN("JSON_DEPTH") }, BUILDER(Create_func_json_depth)},
+  { { C_STRING_WITH_LEN("JSON_PRETTY") }, BUILDER(Create_func_json_pretty)},
   { { C_STRING_WITH_LEN("JSON_TYPE") }, BUILDER(Create_func_json_type)},
   { { C_STRING_WITH_LEN("JSON_KEYS") }, BUILDER(Create_func_json_keys)},
   { { C_STRING_WITH_LEN("JSON_EXTRACT") }, BUILDER(Create_func_json_extract)},
@@ -7582,7 +7614,10 @@ static Native_func_registry func_array[] =
   { { C_STRING_WITH_LEN("JSON_ARRAY") }, BUILDER(Create_func_json_array)},
   { { C_STRING_WITH_LEN("JSON_REMOVE") }, BUILDER(Create_func_json_remove)},
   { { C_STRING_WITH_LEN("JSON_MERGE") }, BUILDER(Create_func_json_merge)},
+  { { C_STRING_WITH_LEN("JSON_MERGE_PATCH") }, BUILDER(Create_func_json_merge_patch)},
+  { { C_STRING_WITH_LEN("JSON_MERGE_PRESERVE") }, BUILDER(Create_func_json_merge_preserve)},
   { { C_STRING_WITH_LEN("JSON_QUOTE") }, BUILDER(Create_func_json_quote)},
+  { { C_STRING_WITH_LEN("JSON_STORAGE_SIZE") }, BUILDER(Create_func_json_storage_size)},
   { { C_STRING_WITH_LEN("JSON_UNQUOTE") }, BUILDER(Create_func_json_unquote)},
   { { C_STRING_WITH_LEN("IS_FREE_LOCK") }, BUILDER(Create_func_is_free_lock)},
   { { C_STRING_WITH_LEN("IS_USED_LOCK") }, BUILDER(Create_func_is_used_lock)},
@@ -7657,7 +7692,6 @@ static Native_func_registry func_array[] =
   { { C_STRING_WITH_LEN("POLYGONFROMWKB") }, GEOM_BUILDER(Create_func_polygonfromwkb_deprecated)},
   { { C_STRING_WITH_LEN("POW") }, BUILDER(Create_func_pow)},
   { { C_STRING_WITH_LEN("POWER") }, BUILDER(Create_func_pow)},
-  { { C_STRING_WITH_LEN("PRIV_USER") }, BUILDER(Create_func_priv_user)},
   { { C_STRING_WITH_LEN("QUOTE") }, BUILDER(Create_func_quote)},
   { { C_STRING_WITH_LEN("RADIANS") }, BUILDER(Create_func_radians)},
   { { C_STRING_WITH_LEN("RAND") }, BUILDER(Create_func_rand)},

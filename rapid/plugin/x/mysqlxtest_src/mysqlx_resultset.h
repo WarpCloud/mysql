@@ -1,15 +1,21 @@
 /*
- * Copyright (c) 2015, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; version 2 of the
- * License.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License, version 2.0,
+ * as published by the Free Software Foundation.
+ *
+ * This program is also distributed with certain software (including
+ * but not limited to OpenSSL) that is licensed under separate terms,
+ * as designated in a particular file or component or in included license
+ * documentation.  The authors of MySQL hereby grant you an additional
+ * permission to link the program and your derivative works with the
+ * separately licensed software that they have included with MySQL.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License, version 2.0, for more details.
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
@@ -30,7 +36,6 @@
 
 #include "ngs_common/xdatetime.h"
 #include "mysqlx_protocol.h"
-#include "mysqlx_common.h"
 
 
 namespace Mysqlx
@@ -61,7 +66,7 @@ namespace mysqlx
     DECIMAL
   };
 
-  struct MYSQLXTEST_PUBLIC ColumnMetadata
+  struct ColumnMetadata
   {
     FieldType type;
     std::string name;
@@ -83,7 +88,7 @@ namespace mysqlx
     uint32_t content_type;
   };
 
-  class MYSQLXTEST_PUBLIC Row
+  class Row
   {
   public:
     ~Row();
@@ -117,7 +122,7 @@ namespace mysqlx
     Mysqlx::Resultset::Row *m_data;
   };
 
-  class MYSQLXTEST_PUBLIC ResultData
+  class ResultData
   {
   public:
     ResultData(ngs::shared_ptr<std::vector<ColumnMetadata> > columns);
@@ -133,7 +138,7 @@ namespace mysqlx
     size_t m_row_index;
   };
 
-  class MYSQLXTEST_PUBLIC Result
+  class Result
   {
   public:
     ~Result();

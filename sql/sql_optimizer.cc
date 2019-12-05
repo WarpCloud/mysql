@@ -1,13 +1,20 @@
-/* Copyright (c) 2000, 2016, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2000, 2018, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -1321,7 +1328,7 @@ void JOIN::test_skip_sort()
       is going to be used as it is applied now only for one table queries
       with covering indexes.
     */
-    if (!(select_lex->active_options() & SELECT_BIG_RESULT) ||
+    if (!(select_lex->active_options() & SELECT_BIG_RESULT || with_json_agg) ||
         (tab->quick() &&
          tab->quick()->get_type() ==
            QUICK_SELECT_I::QS_TYPE_GROUP_MIN_MAX))
@@ -1968,6 +1975,7 @@ test_if_skip_sort_order(JOIN_TAB *tab, ORDER *order, ha_rows select_limit,
   Opt_trace_object
     trace_skip_sort_order(trace, "reconsidering_access_paths_for_index_ordering");
   trace_skip_sort_order.add_alnum("clause", clause_type);
+  Opt_trace_array trace_steps(trace, "steps");
 
   if (ref_key >= 0)
   {
@@ -2027,6 +2035,7 @@ test_if_skip_sort_order(JOIN_TAB *tab, ORDER *order, ha_rows select_limit,
           key_map new_ref_key_map;  // Force the creation of quick select
           new_ref_key_map.set_bit(new_ref_key); // only for new_ref_key.
 
+          Opt_trace_object trace_wrapper(trace);
           Opt_trace_object
             trace_recest(trace, "rows_estimation");
           trace_recest.add_utf8_table(tab->table_ref).
@@ -2041,8 +2050,8 @@ test_if_skip_sort_order(JOIN_TAB *tab, ORDER *order, ha_rows select_limit,
                               false,   // don't force quick range
                               order->direction, tab,
                               // we are after make_join_select():
-                              tab->condition(), &tab->needed_reg,
-                              &qck) <= 0;
+                              tab->condition(), &tab->needed_reg, &qck,
+                              tab->table()->force_index) <= 0;
           DBUG_ASSERT(tab->quick() == save_quick);
           tab->set_quick(qck);
           if (no_quick)
@@ -2127,6 +2136,7 @@ test_if_skip_sort_order(JOIN_TAB *tab, ORDER *order, ha_rows select_limit,
         best_key != ref_key)
     {
       tab->quick_order_tested.set_bit(best_key);
+      Opt_trace_object trace_wrapper(trace);
       Opt_trace_object
         trace_recest(trace, "rows_estimation");
       trace_recest.add_utf8_table(tab->table_ref).
@@ -2143,7 +2153,7 @@ test_if_skip_sort_order(JOIN_TAB *tab, ORDER *order, ha_rows select_limit,
                         join->unit->select_limit_cnt,
                         true,     // force quick range
                         order->direction, tab, tab->condition(),
-                        &tab->needed_reg, &qck);
+                        &tab->needed_reg, &qck, tab->table()->force_index);
       /*
         If tab->quick() pointed to another quick than save_quick, we would
         lose access to it and leak memory.
@@ -2165,7 +2175,7 @@ test_if_skip_sort_order(JOIN_TAB *tab, ORDER *order, ha_rows select_limit,
     set_up_ref_access_to_key= false;
   }
 
-check_reverse_order:                  
+check_reverse_order:
   DBUG_ASSERT(order_direction != 0);
 
   if (order_direction == -1)		// If ORDER BY ... DESC
@@ -2372,6 +2382,7 @@ fix_ICP:
     }
   }
 
+  trace_steps.end();
   Opt_trace_object
     trace_change_index(trace, "index_order_summary");
   trace_change_index.add_utf8_table(tab->table_ref)
@@ -2447,11 +2458,10 @@ bool JOIN::prune_table_partitions()
   access can utilize more keyparts than 'ref' access. Conditions
   for doing switching:
 
-  1) Range access is possible.
+  1) Range access is possible Or tab->dodgy_ref_cost is set.
   2) This function is not relevant for FT, since there is no range access for
      that type of index.
-  3) Used parts of key shouldn't have nullable parts, i.e we're
-     going to use 'ref' access, not ref_or_null.
+  3) Used parts of key shouldn't have nullable parts & ref_or_null isn't used.
   4) 'ref' access depends on a constant, not a value read from a
      table earlier in the join sequence.
 
@@ -2497,8 +2507,7 @@ bool JOIN::prune_table_partitions()
 
 static bool can_switch_from_ref_to_range(THD *thd, JOIN_TAB *tab)
 {
-
-  if (tab->quick() &&                                        // 1)
+  if ((tab->quick() || tab->dodgy_ref_cost) &&               // 1)
       tab->position()->key->keypart != FT_KEYPART)           // 2)
   {
     uint keyparts= 0, length= 0;
@@ -2513,9 +2522,9 @@ static bool can_switch_from_ref_to_range(THD *thd, JOIN_TAB *tab)
         dep_map)                                             // 4)
       return false;
 
-    if (tab->position()->key->key == tab->quick()->index &&  // 5a)
-        length < tab->quick()->max_used_key_length)          // 5b)
-      return true;
+    if (tab->quick() &&
+        tab->position()->key->key == tab->quick()->index)    // 5a)
+      return length < tab->quick()->max_used_key_length;     // 5b)
     else if (tab->dodgy_ref_cost)                            // 6)
     {
       key_map new_ref_key_map;
@@ -2523,7 +2532,10 @@ static bool can_switch_from_ref_to_range(THD *thd, JOIN_TAB *tab)
 
       Opt_trace_context * const trace= &thd->opt_trace;
       Opt_trace_object trace_wrapper(trace);
-      Opt_trace_array
+
+      Opt_trace_object
+        can_switch(trace, "check_if_range_uses_more_keyparts_than_ref");
+      Opt_trace_object
         trace_setup_cond(trace, "rerunning_range_optimizer_for_single_index");
 
       QUICK_SELECT_I *qck;
@@ -2536,17 +2548,26 @@ static bool can_switch_from_ref_to_range(THD *thd, JOIN_TAB *tab)
                             tab->join_cond() ? tab->join_cond() :
                             tab->join()->where_cond,
                             &tab->needed_reg,
-                            &qck) > 0)
+                            &qck, true) > 0)
       {
-        delete tab->quick();
-        tab->set_quick(qck);
-        return true;
+        if (length < qck->max_used_key_length)
+        {
+          delete tab->quick();
+          tab->set_quick(qck);
+          return true;
+        }
+        else
+        {
+          Opt_trace_object (trace, "access_type_unchanged").
+            add("ref_key_length", length).
+            add("range_key_length", qck->max_used_key_length);
+          delete qck;
+        }
       }
     }
   }
   return false;
 }
-
 
 /**
  An utility function - apply heuristics and optimize access methods to tables.
@@ -4583,95 +4604,6 @@ change_cond_ref_to_const(THD *thd, I_List<COND_CMP> *save_list,
   return false;
 }
 
-static bool
-change_cond_ref_to_null(THD *thd, Item *cond,
-                         Item *field, Item *value)
-{
-  if (cond->type() == Item::COND_ITEM)
-  {
-    Item_cond *const item_cond= down_cast<Item_cond *>(cond);
-    List_iterator<Item> li(*item_cond->argument_list());
-    Item *item;
-    while ((item=li++))
-    {
-      if (change_cond_ref_to_null(thd, item, field, value))
-        return true;
-    }
-    return false;
-  }
-  if (cond->eq_cmp_result() == Item::COND_OK) {
-    return false;                // Not a boolean function
-  }
-
-  Item_bool_func2 *func= down_cast<Item_bool_func2 *>(cond);
-    Item **args= func->arguments();
-    Item *left_item=  args[0];
-    Item *right_item= args[1];
-
-    if (right_item->eq(field,0) && left_item != value)
-    {
-      Item *const clone= value->clone_item();
-      if (thd->is_error())
-        return true;
-
-      if (clone == NULL)
-        return false;
-
-      clone->collation.set(right_item->collation);
-      thd->change_item_tree(args + 1, clone);
-      func->update_used_tables();
-      if (func->set_cmp_func())
-        return true;
-    }
-    if (left_item->eq(field,0) && right_item != value)
-    {
-      Item *const clone= value->clone_item();
-      if (thd->is_error())
-        return true;
-
-      if (clone == NULL)
-        return false;
-
-      clone->collation.set(left_item->collation);
-      thd->change_item_tree(args, clone);
-      func->update_used_tables();
-      if (func->set_cmp_func())
-        return true;
-    }
-  return false;
-}
-
-static bool
-propagate_cond_null(THD *thd, Item *and_father, Item *cond)
-{
-  if (cond->type() == Item::COND_ITEM)
-  {
-    Item_cond *const item_cond= down_cast<Item_cond *>(cond);
-    bool and_level= item_cond->functype() == Item_func::COND_AND_FUNC;
-    List_iterator_fast<Item> li(*item_cond->argument_list());
-    Item *item;
-    while ((item=li++))
-    {
-      if (propagate_cond_null(thd, and_level ? cond : item, item))
-        return true;
-    }
-  }
-  else if (and_father != cond && !cond->marker)		// In a AND group
-  {
-    Item_func *func;
-    if (cond->type() == Item::FUNC_ITEM &&
-        (func = down_cast<Item_func *>(cond))
-        && func->functype() == Item_func::ISNULL_FUNC) {
-      Item **args = func->arguments();
-      Item *null_item = new Item_null();
-      if (change_cond_ref_to_null(thd, and_father, args[0], null_item))
-        return true;
-    }
-  }
-
-  return false;
-}
-
 /**
   Propagate constant values in a condition
 
@@ -4853,7 +4785,8 @@ void JOIN::update_depend_map(ORDER *order)
   {
     table_map depend_map;
     order->item[0]->update_used_tables();
-    order->depend_map=depend_map=order->item[0]->used_tables();
+    order->depend_map= depend_map=
+      order->item[0]->used_tables() & ~PARAM_TABLE_BIT;
     order->used= 0;
     // Not item_sum(), RAND() and no reference to table outside of sub select
     if (!(order->depend_map & (OUTER_REF_TABLE_BIT | RAND_TABLE_BIT))
@@ -6033,7 +5966,7 @@ static ha_rows get_quick_record_count(THD *thd, JOIN_TAB *tab, ha_rows limit)
                                  ORDER::ORDER_NOT_RELEVANT, tab,
                                  tab->join_cond() ? tab->join_cond() :
                                  tab->join()->where_cond,
-                                 &tab->needed_reg, &qck);
+                                 &tab->needed_reg, &qck, tab->table()->force_index);
     tab->set_quick(qck);
 
     if (error == 1)
@@ -6248,40 +6181,39 @@ static void add_not_null_conds(JOIN *join)
 }
 
 
-/* 
-  Check if given expression uses only table fields covered by the given index
+/**
+  Check if given expression only uses fields covered by index #keyno in the
+  table tbl. The expression can use any fields in any other tables.
 
-  SYNOPSIS
-    uses_index_fields_only()
-      item           Expression to check
-      tbl            The table having the index
-      keyno          The index number
-      other_tbls_ok  TRUE <=> Fields of other non-const tables are allowed
+  The expression is guaranteed not to be AND or OR - those constructs are
+  handled outside of this function.
 
-  DESCRIPTION
-    Check if given expression only uses fields covered by index #keyno in the
-    table tbl. The expression can use any fields in any other tables.
-    
-    The expression is guaranteed not to be AND or OR - those constructs are 
-    handled outside of this function.
+  Restrict some function types from being pushed down to storage engine:
+  a) Don't push down the triggered conditions. Nested outer joins execution
+     code may need to evaluate a condition several times (both triggered and
+     untriggered).
+  b) Stored functions contain a statement that might start new operations (like
+     DML statements) from within the storage engine. This does not work against
+     all SEs.
+  c) Subqueries might contain nested subqueries and involve more tables.
 
-  RETURN
-    TRUE   Yes
-    FALSE  No
+  @param  item           Expression to check
+  @param  tbl            The table having the index
+  @param  keyno          The index number
+  @param  other_tbls_ok  TRUE <=> Fields of other non-const tables are allowed
+
+  @return false if No, true if Yes
 */
 
 bool uses_index_fields_only(Item *item, TABLE *tbl, uint keyno, 
                             bool other_tbls_ok)
 {
+  // Restrictions b and c.
+  if (item->has_stored_program() || item->has_subquery())
+    return false;
+
   if (item->const_item())
-  {
-    /*
-      const_item() might not return correct value if the item tree
-      contains a subquery. If this is the case we do not include this
-      part of the condition.
-    */
-    return !item->has_subquery();
-  }
+    return true;
 
   const Item::Type item_type= item->type();
 
@@ -6292,21 +6224,14 @@ bool uses_index_fields_only(Item *item, TABLE *tbl, uint keyno,
       const Item_func::Functype func_type= item_func->functype();
 
       /*
-        Avoid some function types from being pushed down to storage engine:
-        - Don't push down the triggered conditions. Nested outer joins
-          execution code may need to evaluate a condition several times
-          (both triggered and untriggered).
-          TODO: Consider cloning the triggered condition and using the
-                copies for: 
-                 1. push the first copy down, to have most restrictive
-                    index condition possible.
-                 2. Put the second copy into tab->m_condition.
-        - Stored functions contain a statement that might start new operations
-          against the storage engine. This does not work against all storage
-          engines.
+        Restriction a.
+        TODO: Consider cloning the triggered condition and using the copies
+        for:
+        1. push the first copy down, to have most restrictive index condition
+           possible.
+        2. Put the second copy into tab->m_condition.
       */
-      if (func_type == Item_func::TRIG_COND_FUNC ||
-          func_type == Item_func::FUNC_SP)
+      if (func_type == Item_func::TRIG_COND_FUNC)
         return false;
 
       /* This is a function, apply condition recursively to arguments */
@@ -6479,7 +6404,14 @@ static bool find_eq_ref_candidate(TABLE_LIST *tl, table_map sj_inner_tables)
           if (!(keyuse->used_tables & sj_inner_tables) &&
               !(keyuse->optimize & KEY_OPTIMIZE_REF_OR_NULL))
           {
-            bound_parts|= (key_part_map)1 << keyuse->keypart;
+            /*
+              Consider only if the resulting condition does not pass a NULL
+              value through. Especially needed for a UNIQUE index on NULLable
+              columns where a duplicate row is possible with NULL values.
+            */
+            if (keyuse->null_rejecting || !keyuse->val->maybe_null ||
+                !keyinfo->key_part[keyuse->keypart].field->maybe_null())
+              bound_parts|= (key_part_map)1 << keyuse->keypart;
           }
           keyuse++;
         } while (keyuse->key == key && keyuse->table_ref == tl);
@@ -6915,14 +6847,14 @@ static uint get_semi_join_select_list_index(Item_field *item_field)
 }
 
 /**
-   @brief 
-   If EXPLAIN EXTENDED, add warning that an index cannot be used for
-   ref access
+   @brief
+   If EXPLAIN EXTENDED  or if the --safe-updates option is enabled, add a
+   warning that an index cannot be used for ref access
 
    @details
-   If EXPLAIN EXTENDED, add a warning for each index that cannot be
-   used for ref access due to either type conversion or different
-   collations on the field used for comparison
+   If EXPLAIN EXTENDED or if the --safe-updates option is enabled, add a
+   warning for each index that cannot be used for ref access due to either type
+   conversion or different collations on the field used for comparison
 
    Example type conversion (char compared to int):
 
@@ -6936,13 +6868,14 @@ static uint get_semi_join_select_list_index(Item_field *item_field)
 
    @param thd                Thread for the connection that submitted the query
    @param field              Field used in comparision
-   @param cant_use_indexes   Indexes that cannot be used for lookup
+   @param cant_use_index   Indexes that cannot be used for lookup
  */
-static void 
-warn_index_not_applicable(THD *thd, const Field *field, 
-                          const key_map cant_use_index) 
+static void
+warn_index_not_applicable(THD *thd, const Field *field,
+                          const key_map cant_use_index)
 {
-  if (thd->lex->describe)
+  if (thd->lex->describe ||
+      thd->variables.option_bits & OPTION_SAFE_UPDATES)
     for (uint j=0 ; j < field->table->s->keys ; j++)
       if (cant_use_index.is_set(j))
         push_warning_printf(thd,
@@ -9520,7 +9453,8 @@ static bool make_join_select(JOIN *join, Item *cond)
                                   false,   // don't force quick range
                                   interesting_order, tab,
                                   tab->condition(),
-                                  &tab->needed_reg, &qck) < 0;
+                                  &tab->needed_reg, &qck,
+                                  tab->table()->force_index) < 0;
               tab->set_quick(qck);
             }
             tab->set_condition(orig_cond);
@@ -9548,7 +9482,7 @@ static bool make_join_select(JOIN *join, Item *cond)
                                   false,   //don't force quick range
                                   ORDER::ORDER_NOT_RELEVANT, tab,
                                   tab->condition(), &tab->needed_reg,
-                                  &qck) < 0;
+                                  &qck, tab->table()->force_index) < 0;
               tab->set_quick(qck);
               if (impossible_where)
                 DBUG_RETURN(1);			// Impossible WHERE
@@ -10025,19 +9959,6 @@ bool optimize_cond(THD *thd, Item **cond, COND_EQUAL **cond_equal,
     This is performed for the WHERE condition and any join conditions, but
     not for the HAVING condition.
   */
-  if (optimizer_flag(thd, OPTIMIZER_SWITCH_PROPAGATE_NULL) && *cond)
-  {
-    Opt_trace_object step_wrapper(trace);
-    step_wrapper.add_alnum("transformation", "null_propagation");
-    {
-      Opt_trace_disable_I_S
-              disable_trace_wrapper(trace, !(*cond)->has_subquery());
-      Opt_trace_array trace_subselect(trace, "subselect_evaluation");
-      if (propagate_cond_null(thd, *cond, *cond))
-        DBUG_RETURN(true);
-    }
-    step_wrapper.add("resulting_condition", *cond);
-  }
   if (join_list)
   {
     Opt_trace_object step_wrapper(trace);
@@ -10618,6 +10539,7 @@ get_sort_by_table(ORDER *a,ORDER *b,TABLE_LIST *tables)
       DBUG_RETURN(0);
     map|=a->item[0]->used_tables();
   }
+  map&= ~PARAM_TABLE_BIT;
   if (!map || (map & (RAND_TABLE_BIT | OUTER_REF_TABLE_BIT)))
     DBUG_RETURN(0);
 

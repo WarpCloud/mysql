@@ -129,7 +129,7 @@ SHOW STATUS LIKE 'locked_connects';
 FLUSH STATUS;
 # Account access permission information for a user should NOT be available
 # through INFORMATION_SCHEMA.user_privileges. The LOGIN permission is NOT a privilege.
-SELECT * FROM INFORMATION_SCHEMA.user_privileges WHERE GRANTEE LIKE '%user%';
+SELECT * FROM INFORMATION_SCHEMA.user_privileges WHERE GRANTEE LIKE '%user%' AND GRANTEE NOT IN ("'mysql.session'@'localhost'");
 
 # Cleanup
 DROP USER user1,user2@localhost,user3,user4@localhost,user6,user7@localhost,
@@ -246,7 +246,7 @@ connection default;
 disconnect con1;
 
 --echo
-CREATE USER user4@localhost IDENTIFIED WITH 'sha256_password' AS 'auth_string'
+CREATE USER user4@localhost IDENTIFIED WITH 'sha256_password' BY 'auth_string'
 ACCOUNT LOCK PASSWORD EXPIRE DEFAULT ACCOUNT UNLOCK PASSWORD EXPIRE INTERVAL 90 DAY;
 --replace_column 3 #
 query_vertical SELECT user,plugin,authentication_string,password_expired,

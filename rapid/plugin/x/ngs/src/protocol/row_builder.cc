@@ -1,15 +1,21 @@
 /*
-* Copyright (c) 2015, 2016 Oracle and/or its affiliates. All rights reserved.
+* Copyright (c) 2015, 2017 Oracle and/or its affiliates. All rights reserved.
 *
-* This program is free software; you can redistribute it and/or
-* modify it under the terms of the GNU General Public License as
-* published by the Free Software Foundation; version 2 of the
-* License.
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License, version 2.0,
+* as published by the Free Software Foundation.
+*
+* This program is also distributed with certain software (including
+* but not limited to OpenSSL) that is licensed under separate terms,
+* as designated in a particular file or component or in included license
+* documentation.  The authors of MySQL hereby grant you an additional
+* permission to link the program and your derivative works with the
+* separately licensed software that they have included with MySQL.
 *
 * This program is distributed in the hope that it will be useful,
 * but WITHOUT ANY WARRANTY; without even the implied warranty of
-* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-* GNU General Public License for more details.
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU General Public License, version 2.0, for more details.
 *
 * You should have received a copy of the GNU General Public License
 * along with this program; if not, write to the Free Software
@@ -126,16 +132,16 @@ static inline int count_leading_zeroes(int i, dec1 val)
   switch (i)
   {
     /* @note Intentional fallthrough in all case labels */
-  case 9: if (val >= 1000000000) break; ++ret;
-  case 8: if (val >= 100000000) break; ++ret;
-  case 7: if (val >= 10000000) break; ++ret;
-  case 6: if (val >= 1000000) break; ++ret;
-  case 5: if (val >= 100000) break; ++ret;
-  case 4: if (val >= 10000) break; ++ret;
-  case 3: if (val >= 1000) break; ++ret;
-  case 2: if (val >= 100) break; ++ret;
-  case 1: if (val >= 10) break; ++ret;
-  case 0: if (val >= 1) break; ++ret;
+  case 9: if (val >= 1000000000) break; ++ret;  // Fall through.
+  case 8: if (val >= 100000000) break; ++ret;  // Fall through.
+  case 7: if (val >= 10000000) break; ++ret;  // Fall through.
+  case 6: if (val >= 1000000) break; ++ret;  // Fall through.
+  case 5: if (val >= 100000) break; ++ret;  // Fall through.
+  case 4: if (val >= 10000) break; ++ret;  // Fall through.
+  case 3: if (val >= 1000) break; ++ret;  // Fall through.
+  case 2: if (val >= 100) break; ++ret;  // Fall through.
+  case 1: if (val >= 10) break; ++ret;  // Fall through.
+  case 0: if (val >= 1) break; ++ret;  // Fall through.
   default: { DBUG_ASSERT(FALSE); }
   }
   return ret;

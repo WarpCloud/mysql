@@ -1,13 +1,20 @@
-/* Copyright (c) 2016, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software Foundation,
@@ -15,12 +22,22 @@
 
 #include "plugin_utils.h"
 #include "plugin.h"
-#include "sql_service_gr_user.h"
 
 using std::vector;
 
-void unblock_waiting_transactions()
+Blocked_transaction_handler::Blocked_transaction_handler()
 {
+  mysql_mutex_init(key_GR_LOCK_trx_unlocking, &unblocking_process_lock, MY_MUTEX_INIT_FAST);
+}
+
+Blocked_transaction_handler::~Blocked_transaction_handler()
+{
+  mysql_mutex_destroy(&unblocking_process_lock);
+}
+
+void Blocked_transaction_handler::unblock_waiting_transactions()
+{
+  mysql_mutex_lock(&unblocking_process_lock);
   vector<my_thread_id> waiting_threads;
   certification_latch->get_all_waiting_keys(waiting_threads);
 
@@ -52,28 +69,36 @@ void unblock_waiting_transactions()
                  " Check for consistency errors when restarting the service"); /* purecov: inspected */
     }
   }
+  mysql_mutex_unlock(&unblocking_process_lock);
 }
 
-int set_server_read_mode(bool threaded)
+void log_primary_member_details()
 {
-  Sql_service_command *sql_command_interface= new Sql_service_command();
-  int error=
-      sql_command_interface->
-          establish_session_connection(threaded, get_plugin_pointer()) ||
-      sql_command_interface->set_interface_user(GROUPREPL_USER) ||
-      read_mode_handler->set_super_read_only_mode(sql_command_interface);
-  delete sql_command_interface;
-  return error;
+  // Special case to display Primary member details in secondary member logs.
+  if (local_member_info->in_primary_mode() &&
+      (local_member_info->get_role() == Group_member_info::MEMBER_ROLE_SECONDARY))
+  {
+    std::string primary_member_uuid;
+    group_member_mgr->get_primary_member_uuid(primary_member_uuid);
+    Group_member_info* primary_member_info=
+                 group_member_mgr->get_group_member_info(primary_member_uuid);
+    if (primary_member_info != NULL)
+    {
+      log_message(MY_INFORMATION_LEVEL,
+                  "This server is working as secondary member with primary "
+                  "member address %s:%u.",
+                  primary_member_info->get_hostname().c_str(),
+                  primary_member_info->get_port());
+      delete primary_member_info;
+    }
+  }
 }
 
-int reset_server_read_mode(bool threaded)
+void abort_plugin_process(const char *message)
 {
-  Sql_service_command *sql_command_interface= new Sql_service_command();
-  int error=
-      sql_command_interface->
-          establish_session_connection(threaded, get_plugin_pointer()) ||
-      sql_command_interface->set_interface_user(GROUPREPL_USER) ||
-      read_mode_handler->reset_super_read_only_mode(sql_command_interface);
-  delete sql_command_interface;
-  return error;
+  log_message(MY_ERROR_LEVEL, "The plugin encountered a critical error and will abort: %s", message);
+#if !defined(DBUG_OFF)
+  DBUG_SUICIDE();
+#endif
+  abort();
 }

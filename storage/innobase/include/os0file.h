@@ -10,14 +10,21 @@ documentation. The contributions by Percona Inc. are incorporated with
 their permission, and subject to the conditions contained in the file
 COPYING.Percona.
 
-This program is free software; you can redistribute it and/or modify it
-under the terms of the GNU General Public License as published by the
-Free Software Foundation; version 2 of the License.
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License, version 2.0,
+as published by the Free Software Foundation.
 
-This program is distributed in the hope that it will be useful, but
-WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
-Public License for more details.
+This program is also distributed with certain software (including
+but not limited to OpenSSL) that is licensed under separate terms,
+as designated in a particular file or component or in included license
+documentation.  The authors of MySQL hereby grant you an additional
+permission to link the program and your derivative works with the
+separately licensed software that they have included with MySQL.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License, version 2.0, for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
@@ -1118,13 +1125,13 @@ do {									\
 		state, key.m_value, op, name, &locker);			\
 	if (locker != NULL) {						\
 		PSI_FILE_CALL(start_file_open_wait)(			\
-			locker, src_file, src_line);			\
+			locker, src_file, static_cast<uint>(src_line));	\
 	}								\
 } while (0)
 
 # define register_pfs_file_open_end(locker, file, result)		\
 do {									\
-	if (locker != NULL) {				\
+	if (locker != NULL) {						\
 		file.m_psi = PSI_FILE_CALL(				\
 		end_file_open_wait)(					\
 			locker, result);				\
@@ -1132,27 +1139,28 @@ do {									\
 } while (0)
 
 # define register_pfs_file_rename_begin(state, locker, key, op, name,	\
-				src_file, src_line)                     \
-	register_pfs_file_open_begin(state, locker, key, op, name,      \
 					src_file, src_line)             \
+	register_pfs_file_open_begin(					\
+		state, locker, key, op, name,				\
+		src_file, static_cast<uint>(src_line))			\
 
-# define register_pfs_file_rename_end(locker, result)			\
+# define register_pfs_file_rename_end(locker, from, to, result)		\
 do {									\
-	if (locker != NULL) {                              \
+	if (locker != NULL) {						\
 		 PSI_FILE_CALL(						\
-			end_file_open_wait)(				\
-			locker, result);				\
+			end_file_rename_wait)(				\
+			locker, from, to, result);			\
 	}								\
 }while(0)
 
 # define register_pfs_file_close_begin(state, locker, key, op, name,	\
-				      src_file, src_line)		\
+				       src_file, src_line)		\
 do {									\
 	locker = PSI_FILE_CALL(get_thread_file_name_locker)(		\
 		state, key.m_value, op, name, &locker);			\
 	if (locker != NULL) {						\
 		PSI_FILE_CALL(start_file_close_wait)(			\
-			locker, src_file, src_line);			\
+			locker, src_file, static_cast<uint>(src_line));	\
 	}								\
 } while (0)
 
@@ -1167,11 +1175,12 @@ do {									\
 # define register_pfs_file_io_begin(state, locker, file, count, op,	\
 				    src_file, src_line)			\
 do {									\
-	locker = PSI_FILE_CALL(get_thread_file_stream_locker)(	\
+	locker = PSI_FILE_CALL(get_thread_file_stream_locker)(		\
 		state, file.m_psi, op);					\
 	if (locker != NULL) {						\
 		PSI_FILE_CALL(start_file_wait)(				\
-			locker, count, src_file, src_line);		\
+			locker, count,					\
+			src_file, static_cast<uint>(src_line));		\
 	}								\
 } while (0)
 
@@ -2040,6 +2049,11 @@ os_file_get_status(
 	bool		read_only);
 
 #if !defined(UNIV_HOTBACKUP)
+/** return one of the tmpdir path
+@return tmporary dir*/
+char *innobase_mysql_tmpdir(void);
+
+
 /** Creates a temporary file in the location specified by the parameter
 path. If the path is NULL then it will be created on --tmpdir location.
 This function is defined in ha_innodb.cc.

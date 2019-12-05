@@ -1,16 +1,23 @@
 #ifndef ITEM_STRFUNC_INCLUDED
 #define ITEM_STRFUNC_INCLUDED
 
-/* Copyright (c) 2000, 2015, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2000, 2017, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -18,7 +25,6 @@
 
 
 /* This file defines all string functions */
-#include <my_regex.h>
 #include "crypt_genhash_impl.h"       // CRYPT_MAX_PASSWORD_SIZE
 #include "item_func.h"                // Item_func
 
@@ -486,8 +492,6 @@ public:
   String *val_str_ascii(String *str);
   void fix_length_and_dec();
   const char *func_name() const { return "password"; }
-  static char *create_password_hash_buffer(THD *thd, const char *password,
-                                           size_t pass_len);
 };
 
 
@@ -695,24 +699,6 @@ public:
   const char *func_name() const { return "current_user"; }
   const Name_string fully_qualified_func_name() const
   { return NAME_STRING("current_user()"); }
-};
-
-
-class Item_func_priv_user :public Item_func_user
-{
-    typedef Item_func_user super;
-
-    Name_resolution_context *context;
-
-public:
-    explicit Item_func_priv_user(const POS &pos) : super(pos) {}
-
-    // virtual bool itemize(Parse_context *pc, Item **res);
-
-    bool fix_fields(THD *thd, Item **ref);
-    const char *func_name() const { return "priv_user"; }
-    const Name_string fully_qualified_func_name() const
-    { return NAME_STRING("priv_user()"); }
 };
 
 
@@ -1350,28 +1336,6 @@ public:
   void fix_length_and_dec();
   const char *func_name() const{ return "gtid_subtract"; }
   String *val_str_ascii(String *);
-};
-
-class Item_func_regexp_substr :public Item_str_func
-{
-    my_regex_t preg;
-    bool regex_compiled;
-    bool regex_is_const;
-    String prev_regexp;
-    DTCollation cmp_collation;
-    const CHARSET_INFO *regex_lib_charset;
-    int regex_lib_flags;
-    String conv;
-    int regcomp(bool send_error);
-public:
-    Item_func_regexp_substr(const POS &pos, Item *a,Item *b) :Item_str_func(pos, a,b),
-                                                      regex_compiled(0),regex_is_const(0) {}
-    void cleanup();
-    String* val_str(String* str);
-    bool fix_fields(THD *thd, Item **ref);
-    void fix_length_and_dec();
-    const char *func_name() const { return "regexp_substr"; }
-    const CHARSET_INFO *compare_collation() { return cmp_collation.collation; }
 };
 
 #endif /* ITEM_STRFUNC_INCLUDED */

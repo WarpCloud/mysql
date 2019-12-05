@@ -2,6 +2,10 @@
 # Test of multiple query rewrite plugins. This will only work on an
 # installation, where all plugins are in the same directory.
 #
+Warnings:
+Warning	1681	'RESET QUERY CACHE' is deprecated and will be removed in a future release.
+Warnings:
+Warning	1681	'RESET QUERY CACHE' is deprecated and will be removed in a future release.
 # Query rewrite plugin was installed.
 INSTALL PLUGIN rewrite_example SONAME 'rewrite_example.xxx';
 INSERT INTO query_rewrite.rewrite_rules ( pattern, replacement )
@@ -13,7 +17,7 @@ values ( 'select "abc"', 'select "rewritten"' )' by a query rewrite plugin
 Note	1105	Query 'SHOW WARNINGS' rewritten to 'show warnings' by a query rewrite plugin
 CALL query_rewrite.flush_rewrite_rules();
 Warnings:
-Note	1105	Query 'CALL query_rewrite.flush_rewrite_rules()' rewritten to 'call query_rewrite.flush_rewrite_rules()' by a query rewrite plugin
+Warning	1681	'RESET QUERY CACHE' is deprecated and will be removed in a future release.
 Note	1105	Query 'SHOW WARNINGS' rewritten to 'show warnings' by a query rewrite plugin
 SELECT * FROM query_rewrite.rewrite_rules;
 id	pattern	pattern_database	replacement	enabled	message
@@ -39,6 +43,15 @@ UNINSTALL PLUGIN rewrite_example;
 Warnings:
 Note	1105	Query 'UNINSTALL PLUGIN rewrite_example' rewritten to 'uninstall plugin rewrite_example' by a query rewrite plugin
 Warning	1620	Plugin is busy and will be uninstalled on shutdown
+Note	1105	Query 'SHOW WARNINGS' rewritten to 'show warnings' by a query rewrite plugin
 Warnings:
+Note	1105	Query 'DROP DATABASE IF EXISTS query_rewrite' rewritten to 'drop database if exists query_rewrite' by a query rewrite plugin
+Note	1105	Query 'SHOW WARNINGS' rewritten to 'show warnings' by a query rewrite plugin
+Warnings:
+Note	1105	Query 'DROP FUNCTION IF EXISTS load_rewrite_rules' rewritten to 'drop function if exists load_rewrite_rules' by a query rewrite plugin
+Note	1105	Query 'SHOW WARNINGS' rewritten to 'show warnings' by a query rewrite plugin
+Warnings:
+Note	1105	Query 'UNINSTALL PLUGIN rewriter' rewritten to 'uninstall plugin rewriter' by a query rewrite plugin
 Warning	1620	Plugin is busy and will be uninstalled on shutdown
+Note	1105	Query 'SHOW WARNINGS' rewritten to 'show warnings' by a query rewrite plugin
 # Query rewrite plugin was queued for uninstalling.

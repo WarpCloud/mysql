@@ -1,13 +1,20 @@
-/* Copyright (c) 2016, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2016, 2017, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -27,6 +34,8 @@ struct Key : IKey
 {
   Key(const char *a_key_id, const char *a_key_type, const char *a_user_id,
       const void *a_key, size_t a_key_len);
+  Key(const Key& other);
+  Key(IKey *other);
   Key();
 
   ~Key();
@@ -36,6 +45,8 @@ struct Key : IKey
   void store_in_buffer(uchar* buffer, size_t *buffer_position) const;
   std::string* get_key_signature() const;
   std::string* get_key_type();
+  std::string* get_key_id();
+  std::string* get_user_id();
   uchar* get_key_data();
   size_t get_key_data_size();
   size_t get_key_pod_size() const;
@@ -46,9 +57,13 @@ struct Key : IKey
   my_bool is_key_type_valid();
   my_bool is_key_id_valid();
   my_bool is_key_valid();
+  my_bool is_key_length_valid();
 
 private:
-  Key(const Key& other);
+  void init(const char *a_key_id, const char *a_key_type, const char *a_user_id,
+            const void *a_key, size_t a_key_len);
+
+  void clear_key_data();
   void create_key_signature() const;
   my_bool load_string_from_buffer(const uchar *buffer, size_t *buffer_position,
                                   size_t key_pod_size, std::string *string,

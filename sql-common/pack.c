@@ -1,13 +1,25 @@
-/* Copyright (c) 2000, 2014, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2000, 2018, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
+
+   Without limiting anything contained in the foregoing, this file,
+   which is part of C Driver for MySQL (Connector/C), is also subject to the
+   Universal FOSS Exception, version 1.0, a copy of which can be found at
+   http://oss.oracle.com/licenses/universal-foss-exception.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -43,6 +55,40 @@ ulong STDCALL net_field_length(uchar **packet)
   }
   (*packet)+=9;					/* Must be 254 when here */
   return (ulong) uint4korr(pos+1);
+}
+
+/* The same as above but with max length check */
+ulong STDCALL net_field_length_checked(uchar **packet, ulong max_length)
+{
+  ulong len;
+  uchar *pos= (uchar *)*packet;
+
+  if (*pos < 251)
+  {
+    (*packet)++;
+    len= (ulong) *pos;
+    return (len > max_length) ? max_length : len;
+  }
+  if (*pos == 251)
+  {
+    (*packet)++;
+    return NULL_LENGTH;
+  }
+  if (*pos == 252)
+  {
+    (*packet)+=3;
+    len= (ulong) uint2korr(pos+1);
+    return (len > max_length) ? max_length : len;
+  }
+  if (*pos == 253)
+  {
+    (*packet)+=4;
+    len= (ulong) uint3korr(pos+1);
+    return (len > max_length) ? max_length : len;
+  }
+  (*packet)+=9;                                 /* Must be 254 when here */
+  len= (ulong) uint4korr(pos+1);
+  return (len > max_length) ? max_length : len;
 }
 
 /* The same as above but returns longlong */

@@ -1,14 +1,20 @@
-/* Copyright (c) 2014, 2015, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
 
-   This program is free software; you can redistribute it and/or
-   modify it under the terms of the GNU General Public License as
-   published by the Free Software Foundation; version 2 of the
-   License.
+   This program is free software; you can redistribute it and/or modify
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
 
-   This program is distributed in the hope that it will be useful, but
-   WITHOUT ANY WARRANTY; without even the implied warranty of
-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-   General Public License for more details.
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -91,37 +97,38 @@ bool System_table_access::open_table(THD* thd, const LEX_STRING dbstr,
 }
 
 
-void System_table_access::close_table(THD *thd, TABLE* table,
+bool System_table_access::close_table(THD *thd, TABLE* table,
                                       Open_tables_backup *backup,
                                       bool error, bool need_commit)
 {
   Query_tables_list query_tables_list_backup;
+  bool res= false;
 
   DBUG_ENTER("System_table_access::close_table");
 
   if (table)
   {
     if (error)
-      ha_rollback_trans(thd, false);
+      res= ha_rollback_trans(thd, false);
     else
     {
       /*
         To make the commit not to block with global read lock set
         "ignore_global_read_lock" flag to true.
        */
-      ha_commit_trans(thd, false, true);
+      res= ha_commit_trans(thd, false, true);
     }
     if (need_commit)
     {
       if (error)
-        ha_rollback_trans(thd, true);
+        res= ha_rollback_trans(thd, true) || res;
       else
       {
         /*
           To make the commit not to block with global read lock set
           "ignore_global_read_lock" flag to true.
          */
-        ha_commit_trans(thd, true, true);
+        res= ha_commit_trans(thd, true, true) || res;
       }
     }
     /*
@@ -135,7 +142,8 @@ void System_table_access::close_table(THD *thd, TABLE* table,
     thd->restore_backup_open_tables_state(backup);
   }
 
-  DBUG_VOID_RETURN;
+  DBUG_EXECUTE_IF("simulate_flush_commit_error", {res= true;});
+  DBUG_RETURN(res);
 }
 
 

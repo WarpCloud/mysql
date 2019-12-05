@@ -1,13 +1,20 @@
-/* Copyright (c) 2004, 2015, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2004, 2017, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software Foundation,
@@ -23,6 +30,7 @@
 #include "log.h"        // sql_print_error
 #include "sql_class.h"  // struct THD
 #include "mysql/psi/mysql_sp.h"
+#include "sql_table.h"  // write_bin_log
 
 /**
   @addtogroup Event_Scheduler
@@ -419,6 +427,9 @@ Event_queue::recalculate_activation_times(THD *thd)
     Event_queue_element *element = queue[i - 1];
     if (element->status != Event_parse_data::DISABLED)
       break;
+    if (lock_object_name(thd, MDL_key::EVENT,
+                         element->dbname.str, element->name.str))
+      break;
     /*
       This won't cause queue re-order, because we remove
       always the last element.
@@ -428,9 +439,32 @@ Event_queue::recalculate_activation_times(THD *thd)
       Dropping the event from mysql.event table
     */
     if (element->dropped)
+    {
       db_repository->drop_event(thd, element->dbname, element->name, false);
+
+      String sp_sql;
+      if (construct_drop_event_sql(thd, &sp_sql,
+                                   element->dbname,
+                                   element->name))
+      {
+        sql_print_warning("Unable to construct DROP EVENT SQL query string");
+      }
+      else
+      {
+        // Write drop event to bin log.
+        thd->add_to_binlog_accessed_dbs(element->dbname.str);
+        if (write_bin_log(thd, true, sp_sql.c_ptr_safe(), sp_sql.length()))
+        {
+          sql_print_warning("Unable to binlog drop event %s.%s.",
+                            element->dbname.str,
+                            element->name.str);
+        }
+      }
+    }
     delete element;
   }
+  // Release locks taken before drop_event()
+  thd->mdl_context.release_transactional_locks();
   UNLOCK_QUEUE_DATA();
 
   /*

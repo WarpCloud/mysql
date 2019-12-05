@@ -1,13 +1,25 @@
-/* Copyright (c) 2000, 2016, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2000, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
+
+   Without limiting anything contained in the foregoing, this file,
+   which is part of C Driver for MySQL (Connector/C), is also subject to the
+   Universal FOSS Exception, version 1.0, a copy of which can be found at
+   http://oss.oracle.com/licenses/universal-foss-exception.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -20,15 +32,6 @@
 #define TLS_VERSION_OPTION_SIZE 256
 #define SSL_CIPHER_LIST_SIZE 4096
 
-#ifdef HAVE_YASSL
-static const char tls_ciphers_list[]="DHE-RSA-AES256-SHA:DHE-RSA-AES128-SHA:"
-                                     "AES128-RMD:DES-CBC3-RMD:DHE-RSA-AES256-RMD:"
-                                     "DHE-RSA-AES128-RMD:DHE-RSA-DES-CBC3-RMD:"
-                                     "AES256-SHA:RC4-SHA:RC4-MD5:DES-CBC3-SHA:"
-                                     "DES-CBC-SHA:EDH-RSA-DES-CBC3-SHA:"
-                                     "EDH-RSA-DES-CBC-SHA:AES128-SHA:AES256-RMD";
-static const char tls_cipher_blocked[]= "!aNULL:!eNULL:!EXPORT:!LOW:!MD5:!DES:!RC2:!RC4:!PSK:";
-#else
 static const char tls_ciphers_list[]="ECDHE-ECDSA-AES128-GCM-SHA256:"
                                      "ECDHE-ECDSA-AES256-GCM-SHA384:"
                                      "ECDHE-RSA-AES128-GCM-SHA256:"
@@ -69,7 +72,6 @@ static const char tls_cipher_blocked[]= "!aNULL:!eNULL:!EXPORT:!LOW:!MD5:!DES:!R
                                         "!DHE-DSS-DES-CBC3-SHA:!DHE-RSA-DES-CBC3-SHA:"
                                         "!ECDH-RSA-DES-CBC3-SHA:!ECDH-ECDSA-DES-CBC3-SHA:"
                                         "!ECDHE-RSA-DES-CBC3-SHA:!ECDHE-ECDSA-DES-CBC3-SHA:";
-#endif
 
 static my_bool     ssl_initialized         = FALSE;
 
@@ -121,13 +123,21 @@ static DH *get_dh2048(void)
   DH *dh;
   if ((dh=DH_new()))
   {
-    dh->p=BN_bin2bn(dh2048_p,sizeof(dh2048_p),NULL);
-    dh->g=BN_bin2bn(dh2048_g,sizeof(dh2048_g),NULL);
-    if (! dh->p || ! dh->g)
-    {
+    BIGNUM *p= BN_bin2bn(dh2048_p, sizeof(dh2048_p), NULL);
+    BIGNUM *g= BN_bin2bn(dh2048_g, sizeof(dh2048_g), NULL);
+    if (!p || !g
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
+        || !DH_set0_pqg(dh, p, NULL, g)
+#endif /* OPENSSL_VERSION_NUMBER >= 0x10100000L */
+    ) {
+      /* DH_free() will free 'p' and 'g' at once. */
       DH_free(dh);
-      dh=0;
+      return NULL;
     }
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+    dh->p= p;
+    dh->g= g;
+#endif /* OPENSSL_VERSION_NUMBER < 0x10100000L */
   }
   return(dh);
 }
@@ -228,7 +238,11 @@ vio_set_cert_stuff(SSL_CTX *ctx, const char *cert_file, const char *key_file,
   DBUG_RETURN(0);
 }
 
-#ifndef HAVE_YASSL
+/*
+  OpenSSL 1.1 supports native platform threads,
+  so we don't need the following callback functions.
+*/
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
 /* OpenSSL specific */
 
 #ifdef HAVE_PSI_INTERFACE
@@ -390,28 +404,32 @@ static void deinit_lock_callback_functions()
   set_lock_callback_functions(FALSE);
 }
 
+#endif /* OPENSSL_VERSION_NUMBER < 0x10100000L */
+
 void vio_ssl_end()
 {
-  int i= 0;
-
   if (ssl_initialized) {
-    ERR_remove_state(0);
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+    int i;
+
+    ERR_remove_thread_state(0);
+#endif /* OPENSSL_VERSION_NUMBER < 0x10100000L */
     ERR_free_strings();
     EVP_cleanup();
 
     CRYPTO_cleanup_all_ex_data();
 
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
     deinit_lock_callback_functions();
 
-    for (; i < CRYPTO_num_locks(); ++i)
+    for (i= 0; i < CRYPTO_num_locks(); ++i)
       mysql_rwlock_destroy(&openssl_stdlocks[i].lock);
     OPENSSL_free(openssl_stdlocks);
 
+#endif /* OPENSSL_VERSION_NUMBER < 0x10100000L */
     ssl_initialized= FALSE;
   }
 }
-
-#endif //OpenSSL specific
 
 void ssl_start()
 {
@@ -423,10 +441,10 @@ void ssl_start()
     OpenSSL_add_all_algorithms();
     SSL_load_error_strings();
 
-#ifndef HAVE_YASSL
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
     init_ssl_locks();
     init_lock_callback_functions();
-#endif
+#endif /* OPENSSL_VERSION_NUMBER < 0x10100000L */
   }
 }
 
@@ -434,19 +452,11 @@ long process_tls_version(const char *tls_version)
 {
   const char *separator= ",";
   char *token, *lasts= NULL;
-#ifndef HAVE_YASSL
   unsigned int tls_versions_count= 3;
   const char *tls_version_name_list[3]= {"TLSv1", "TLSv1.1", "TLSv1.2"};
   const char ctx_flag_default[]= "TLSv1,TLSv1.1,TLSv1.2";
   const long tls_ctx_list[3]= {SSL_OP_NO_TLSv1, SSL_OP_NO_TLSv1_1, SSL_OP_NO_TLSv1_2};
   long tls_ctx_flag= SSL_OP_NO_TLSv1|SSL_OP_NO_TLSv1_1|SSL_OP_NO_TLSv1_2;
-#else
-  unsigned int tls_versions_count= 2;
-  const char *tls_version_name_list[2]= {"TLSv1", "TLSv1.1"};
-  const long tls_ctx_list[2]= {SSL_OP_NO_TLSv1, SSL_OP_NO_TLSv1_1};
-  const char ctx_flag_default[]= "TLSv1,TLSv1.1";
-  long tls_ctx_flag= SSL_OP_NO_TLSv1|SSL_OP_NO_TLSv1_1;
-#endif
   unsigned int index= 0;
   char tls_version_option[TLS_VERSION_OPTION_SIZE]= "";
   int tls_found= 0;
@@ -489,7 +499,12 @@ new_VioSSLFd(const char *key_file, const char *cert_file,
 {
   DH *dh;
   struct st_VioSSLFd *ssl_fd;
-  long ssl_ctx_options= SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3;
+  /* MySQL 5.7 supports TLS up to v1.2, explicitly disable TLSv1.3. */
+  long ssl_ctx_options= SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3
+#ifdef HAVE_TLSv13
+                        | SSL_OP_NO_TLSv1_3
+#endif /* HAVE_TLSv13 */
+                        ;
   int ret_set_cipherlist= 0;
   char cipher_list[SSL_CIPHER_LIST_SIZE]= {0};
   DBUG_ENTER("new_VioSSLFd");
@@ -518,11 +533,11 @@ new_VioSSLFd(const char *key_file, const char *cert_file,
                     SSL_OP_NO_SSLv3 |
                     SSL_OP_NO_TLSv1 |
                     SSL_OP_NO_TLSv1_1
-#ifndef HAVE_YASSL
                     | SSL_OP_NO_TLSv1_2
-
-
-#endif
+#ifdef HAVE_TLSv13
+                    | SSL_OP_NO_TLSv1_3
+#endif /* HAVE_TLSv13 */
+                    | SSL_OP_NO_TICKET
                    );
   if (!(ssl_fd= ((struct st_VioSSLFd*)
                  my_malloc(key_memory_vio_ssl_fd,
@@ -542,16 +557,38 @@ new_VioSSLFd(const char *key_file, const char *cert_file,
 
   SSL_CTX_set_options(ssl_fd->ssl_context, ssl_ctx_options);
 
+#ifdef HAVE_TLSv13
   /*
-    Set the ciphers that can be used
+    MySQL 5.7 doesn't support TLSv1.3 - set empty TLSv1.3 ciphersuites.
+  */
+  if (0 == SSL_CTX_set_ciphersuites(ssl_fd->ssl_context, ""))
+  {
+    *error = SSL_INITERR_CIPHERS;
+    DBUG_PRINT("error", ("%s", sslGetErrString(*error)));
+    report_errors();
+    SSL_CTX_free(ssl_fd->ssl_context);
+    my_free(ssl_fd);
+    DBUG_RETURN(0);
+  }
+#endif /* HAVE_TLSv13 */
+
+  /*
+    We explicitly prohibit weak ciphers.
     NOTE: SSL_CTX_set_cipher_list will return 0 if
     none of the provided ciphers could be selected
   */
-  strcat(cipher_list, tls_cipher_blocked);
-  if (cipher)
-    strcat(cipher_list, cipher);
-  else
-    strcat(cipher_list, tls_ciphers_list);
+  strncpy(cipher_list, tls_cipher_blocked, SSL_CIPHER_LIST_SIZE - 1);
+
+  /*
+    If ciphers are specified explicitly by caller, use them.
+    Otherwise, fallback to the default list.
+
+    In either case, we make sure we stay within the valid bounds.
+    Note that we have already consumed tls_cipher_blocked
+    worth of space.
+  */
+  strncat(cipher_list, cipher == 0 ? tls_ciphers_list : cipher,
+          SSL_CIPHER_LIST_SIZE - strlen(cipher_list) - 1);
 
   if (ret_set_cipherlist == SSL_CTX_set_cipher_list(ssl_fd->ssl_context, cipher_list))
   {
@@ -594,10 +631,6 @@ new_VioSSLFd(const char *key_file, const char *cert_file,
 
   if (crl_file || crl_path)
   {
-#ifdef HAVE_YASSL
-    DBUG_PRINT("warning", ("yaSSL doesn't support CRL"));
-    DBUG_ASSERT(0);
-#else
     X509_STORE *store= SSL_CTX_get_cert_store(ssl_fd->ssl_context);
     /* Load crls from the trusted ca */
     if (X509_STORE_load_locations(store, crl_file, crl_path) == 0 ||
@@ -613,7 +646,6 @@ new_VioSSLFd(const char *key_file, const char *cert_file,
       my_free(ssl_fd);
       DBUG_RETURN(0);
     }
-#endif
   }
 
   if (vio_set_cert_stuff(ssl_fd->ssl_context, cert_file, key_file, error))

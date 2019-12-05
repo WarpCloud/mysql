@@ -1,13 +1,20 @@
-/* Copyright (c) 2000, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2000, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -49,6 +56,7 @@
 #include "datadict.h"   // dd_frm_type()
 #include "sql_hset.h"   // Hash_set
 #include "sql_tmp_table.h" // free_tmp_table
+#include "sql_update.h" // records_are_comparable
 #include "table_cache.h" // Table_cache_manager, Table_cache
 #include "log.h"
 #include "binlog.h"
@@ -245,6 +253,28 @@ bool Strict_error_handler::handle_condition(THD *thd,
   return false;
 }
 
+/**
+  Implementation of Partition_in_shared_ts error handler.
+  This internal handler is to make sure that deprecation warning is not
+  displayed again if already displayed once.
+*/
+bool Partition_in_shared_ts_error_handler::handle_condition(
+                                   THD *thd,
+                                   uint sql_errno,
+                                   const char *sqlstate,
+                                   Sql_condition::enum_severity_level *level,
+                                   const char *msg)
+{
+  if (sql_errno == ER_WARN_DEPRECATED_SYNTAX_NO_REPLACEMENT &&
+      strstr(msg, "InnoDB : A table partition in a shared tablespace") != NULL) {
+    if (m_is_already_reported == false) {
+      m_is_already_reported= true;
+      thd->get_stmt_da()->push_warning(thd, sql_errno, sqlstate, *level, msg);
+    }
+    return true;
+  }
+  return false;
+}
 
 /**
   This internal handler is used to trap ER_NO_SUCH_TABLE and
@@ -1041,7 +1071,6 @@ OPEN_TABLE_LIST *list_open_tables(THD *thd, const char *db, const char *wild)
   TABLE_LIST table_list;
   DBUG_ENTER("list_open_tables");
 
-  memset(&table_list, 0, sizeof(table_list));
   start_list= &open_list;
   open_list=0;
 
@@ -1923,7 +1952,7 @@ bool close_temporary_tables(THD *thd)
   /* scan sorted tmps to generate sequence of DROP */
   for (table= thd->temporary_tables; table; table= next)
   {
-    if (is_user_table(table))
+    if (is_user_table(table) && table->should_binlog_drop_if_temp())
     {
       bool save_thread_specific_used= thd->thread_specific_used;
       my_thread_id save_pseudo_thread_id= thd->variables.pseudo_thread_id;
@@ -1944,27 +1973,28 @@ bool close_temporary_tables(THD *thd)
            table= next)
       {
         /* Separate transactional from non-transactional temp tables */
-        if (table->s->tmp_table == TRANSACTIONAL_TMP_TABLE)
-        {
-          found_trans_table= true;
-          /*
-            We are going to add ` around the table names and possible more
-            due to special characters
-          */
-          append_identifier(thd, &s_query_trans, table->s->table_name.str,
-                            strlen(table->s->table_name.str));
-          s_query_trans.append(',');
-        }
-        else if (table->s->tmp_table == NON_TRANSACTIONAL_TMP_TABLE)
-        {
-          found_non_trans_table= true;
-          /*
-            We are going to add ` around the table names and possible more
-            due to special characters
-          */
-          append_identifier(thd, &s_query_non_trans, table->s->table_name.str,
-                            strlen(table->s->table_name.str));
-          s_query_non_trans.append(',');
+        if (table->should_binlog_drop_if_temp()) {
+          if (table->s->tmp_table == TRANSACTIONAL_TMP_TABLE) {
+            found_trans_table= true;
+            /*
+              We are going to add ` around the table names and possible more
+              due to special characters
+            */
+            append_identifier(thd, &s_query_trans, table->s->table_name.str,
+                              strlen(table->s->table_name.str));
+            s_query_trans.append(',');
+          }
+          else if (table->s->tmp_table == NON_TRANSACTIONAL_TMP_TABLE)
+          {
+            found_non_trans_table= true;
+            /*
+              We are going to add ` around the table names and possible more
+              due to special characters
+            */
+            append_identifier(thd, &s_query_non_trans, table->s->table_name.str,
+                              strlen(table->s->table_name.str));
+            s_query_non_trans.append(',');
+          }
         }
 
         next= table->next;
@@ -2047,6 +2077,7 @@ bool close_temporary_tables(THD *thd)
     else
     {
       next= table->next;
+      mysql_lock_remove(thd, thd->lock, table);
       close_temporary(table, 1, 1);
       slave_closed_temp_tables++;
     }
@@ -3408,18 +3439,67 @@ retry_share:
       goto err_unlock;
     }
 
-    /* Open view */
-    bool view_open_result= open_and_read_view(thd, share, table_list);
+    /*
+      Read definition of the existing view, unless the open is for a table
+      to be created. This scenario will happen only when there exists a view and
+      the current CREATE TABLE request is with the same name.
+    */
+    if (table_list->open_strategy != TABLE_LIST::OPEN_FOR_CREATE)
+    {
+      bool view_open_result= open_and_read_view(thd, share, table_list);
 
-    /* TODO: Don't free this */
-    release_table_share(share);
-    mysql_mutex_unlock(&LOCK_open);
+      /* TODO: Don't free this */
+      release_table_share(share);
+      mysql_mutex_unlock(&LOCK_open);
 
-    if (view_open_result)
-      DBUG_RETURN(true);
+      if (view_open_result)
+        DBUG_RETURN(true);
 
-    if (parse_view_definition(thd, table_list))
-      DBUG_RETURN(true);
+      if (table_list->is_view())
+      {
+        // See comments in tdc_open_view() for explanation.
+        if (!table_list->prelocking_placeholder &&
+            table_list->prepare_security(thd))
+          DBUG_RETURN(true);
+      }
+
+      if (parse_view_definition(thd, table_list))
+        DBUG_RETURN(true);
+    }
+    else
+    {
+      release_table_share(share);
+      mysql_mutex_unlock(&LOCK_open);
+
+      /*
+        For SP and PS, LEX objects are created at the time of statement prepare.
+        And open_table() is called for every execute after that. Skip creation
+        of LEX objects if it is already present.
+      */
+      if (!table_list->is_view())
+      {
+        Prepared_stmt_arena_holder ps_arena_holder(thd);
+
+        /*
+          Since we are skipping parse_view_definition(), which creates view LEX
+          object used by the executor and other parts of the code to detect the
+          presence of a view, a dummy LEX object needs to be created.
+        */
+        table_list->set_view_query((LEX *) new(thd->mem_root) st_lex_local);
+        if (!table_list->is_view())
+          DBUG_RETURN(true);
+
+        // Create empty list of view_tables.
+        table_list->view_tables = new (thd->mem_root) List<TABLE_LIST>;
+        if (table_list->view_tables == NULL)
+          DBUG_RETURN(true);
+
+        table_list->view_db.str= table_list->db;
+        table_list->view_db.length= table_list->db_length;
+        table_list->view_name.str= table_list->table_name;
+        table_list->view_name.length= table_list->table_name_length;
+      }
+    }
 
     DBUG_ASSERT(table_list->is_view());
 
@@ -4300,6 +4380,29 @@ bool tdc_open_view(THD *thd, TABLE_LIST *table_list, const char *alias,
     if (view_open_result)
       return true;
 
+    if (table_list->is_view())
+    {
+      /*
+        It's an execution of a PS/SP and the view has already been unfolded
+        into a list of used tables. Now we only need to update the information
+        about granted privileges in the view tables with the actual data
+        stored in MySQL privilege system.  We don't need to restore the
+        required privileges (by calling register_want_access) because they has
+        not changed since PREPARE or the previous execution: the only case
+        when this information is changed is execution of UPDATE on a view, but
+        the original want_access is restored in its end.
+
+        Optimizer trace: because tables have been unfolded already, they are
+        in LEX::query_tables of the statement using the view. So privileges on
+        them are checked as done for explicitely listed tables, in constructor
+        of Opt_trace_start. Security context change is checked in
+        prepare_security() below.
+      */
+      if (!table_list->prelocking_placeholder &&
+          table_list->prepare_security(thd))
+        return true;
+    }
+
     bool view_parse_result= false;
     if (!(flags & OPEN_VIEW_NO_PARSE))
       view_parse_result= parse_view_definition(thd, table_list);
@@ -4351,6 +4454,7 @@ static bool open_table_entry_fini(THD *thd, TABLE_SHARE *share, TABLE *entry)
       error= temp_buf.append(".");
       append_identifier(thd, &temp_buf, share->table_name.str,
                         strlen(share->table_name.str));
+      error= temp_buf.append(" /* generated by server, implicitly emptying in-memory table */");
       if (mysql_bin_log.write_dml_directly(thd, temp_buf.c_ptr_safe(),
                                            temp_buf.length()))
         return TRUE;
@@ -6912,6 +7016,8 @@ TABLE *open_table_uncached(THD *thd, const char *path, const char *db,
 
   if (add_to_temporary_tables_list)
   {
+    tmp_table->set_binlog_drop_if_temp(!thd->is_current_stmt_binlog_disabled()
+                                 && !thd->is_current_stmt_binlog_format_row());
     /* growing temp list at the head */
     tmp_table->next= thd->temporary_tables;
     if (tmp_table->next)
@@ -9415,6 +9521,7 @@ inline bool call_before_insert_triggers(THD *thd,
   before triggers.
 
   @param thd           thread context
+  @param optype_info   COPY_INFO structure used for default values handling
   @param fields        Item_fields list to be filled
   @param values        values to fill with
   @param table         TABLE-object holding list of triggers to be invoked
@@ -9431,7 +9538,8 @@ inline bool call_before_insert_triggers(THD *thd,
 */
 
 bool
-fill_record_n_invoke_before_triggers(THD *thd, List<Item> &fields,
+fill_record_n_invoke_before_triggers(THD *thd, COPY_INFO *optype_info,
+                                     List<Item> &fields,
                                      List<Item> &values, TABLE *table,
                                      enum enum_trigger_event_type event,
                                      int num_fields)
@@ -9455,6 +9563,14 @@ fill_record_n_invoke_before_triggers(THD *thd, List<Item> &fields,
       MY_BITMAP insert_into_fields_bitmap;
       bitmap_init(&insert_into_fields_bitmap, NULL, num_fields, false);
 
+      /*
+        Evaluate DEFAULT functions like CURRENT_TIMESTAMP.
+        COPY_INFO::set_function_defaults() causes store_timestamp to be called
+        on the columns that are not on the list of assigned_columns.
+      */
+      if (optype_info->function_defaults_apply_on_columns(table->write_set))
+        optype_info->set_function_defaults(table);
+
       rc= fill_record(thd, table, fields, values, NULL,
                       &insert_into_fields_bitmap);
 
@@ -9466,9 +9582,33 @@ fill_record_n_invoke_before_triggers(THD *thd, List<Item> &fields,
     }
     else
     {
-      rc= fill_record(thd, table, fields, values, NULL, NULL) ||
-          table->triggers->process_triggers(thd, event, TRG_ACTION_BEFORE,
-                                            true);
+      rc= fill_record(thd, table, fields, values, NULL, NULL);
+
+      if (!rc)
+      {
+        /*
+          Unlike INSERT and LOAD, UPDATE operation requires comparison of old
+          and new records to determine whether function defaults have to be
+          evaluated.
+        */
+        if (optype_info->get_operation_type() == COPY_INFO::UPDATE_OPERATION)
+        {
+          /*
+            Evaluate function defaults for columns with ON UPDATE clause only
+            if any other column of the row is updated.
+          */
+          if ((!records_are_comparable(table) || compare_records(table)) &&
+              (optype_info->
+               function_defaults_apply_on_columns(table->write_set)))
+            optype_info->set_function_defaults(table);
+        }
+        else if(optype_info->
+                function_defaults_apply_on_columns(table->write_set))
+          optype_info->set_function_defaults(table);
+
+        rc= table->triggers->process_triggers(thd, event, TRG_ACTION_BEFORE,
+                                              true);
+      }
     }
     /* 
       Re-calculate generated fields to cater for cases when base columns are 

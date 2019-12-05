@@ -1,13 +1,20 @@
-/* Copyright (c) 2000, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2000, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -263,8 +270,8 @@ ACL_PROXY_USER::check_validity(bool check_no_resolve)
 {
   if (check_no_resolve && 
       (hostname_requires_resolving(host.get_host()) ||
-       hostname_requires_resolving(proxied_host.get_host())))
-  {
+       hostname_requires_resolving(proxied_host.get_host())) &&
+      strcmp(host.get_host(), "localhost") != 0) {
     sql_print_warning("'proxies_priv' entry '%s@%s %s@%s' "
                       "ignored in --skip-name-resolve mode.",
                       proxied_user ? proxied_user : "",
@@ -730,7 +737,7 @@ bool GRANT_TABLE::init(TABLE *col_privs)
 
     if (!col_privs->key_info)
     {
-      my_error(ER_TABLE_CORRUPT, MYF(0), col_privs->s->db.str,
+      my_error(ER_MISSING_KEY, MYF(0), col_privs->s->db.str,
                col_privs->s->table_name.str);
       return true;
     }
@@ -957,54 +964,6 @@ acl_find_proxy_user(const char *user, const char *host, const char *ip,
   DBUG_RETURN(NULL);
 }
 
-/**
-  Validate if a user can proxy as another user. Proxy to anonymous account
-  is allowed so we could construct a super proxy user that can proxy as any
-  user@'%'. Proxy to a specific host is not supported.
-
-  @thd                     current thread
-  @param user              the logged in user (proxy user)
-  @param proxied_user      the effective user a user is trying to
-                           impersonate as (proxied user)
-  @return                  proxy user definition
-    @retval NULL           proxy user definition not found or not applicable
-    @retval non-null       the proxy user data
-*/
-
-ACL_PROXY_USER * acl_check_proxy_user(const char *user,
-                                      const char *host,
-                                      const char *ip,
-                                      const char *proxied_user)
-{
-  DBUG_ENTER("acl_check_proxy_user");
-  DBUG_PRINT("info", ("user=%s host=%s ip=%s proxied_user=%s",
-          user, host, ip, proxied_user));
-
-  if (!strcmp(proxied_user, user))
-  {
-    DBUG_PRINT ("info", ("user is the same as proxied_user"));
-    DBUG_RETURN (NULL);
-  }
-
-  for (ACL_PROXY_USER *proxy= acl_proxy_users->begin();
-       proxy != acl_proxy_users->end(); ++proxy)
-  {
-    // checks if the user has the privilege to do the proxy. proxy to the anonymous
-    // user is allowed so we could construct a super proxy user that could proxy any
-    // user@'%'
-    if (proxy->matches(host, user, ip, proxied_user, FALSE))
-    {
-      DBUG_PRINT("info", ("proxy matched=%s@%s",
-              proxy->get_proxied_user(),
-              proxy->get_proxied_host()));
-      DBUG_RETURN(proxy);
-    }
-  }
-
-  // the user doesn't have the proxy privilege
-  DBUG_PRINT("info", ("No matching users found, returning null"));
-  DBUG_RETURN(NULL);
-}
 
 static uchar* acl_entry_get_key(acl_entry *entry, size_t *length,
                                 my_bool not_used MY_ATTRIBUTE((unused)))
@@ -1389,11 +1348,7 @@ validate_user_plugin_records()
       {
           sql_print_warning("The plugin '%s' is used to authenticate "
                             "user '%s'@'%.*s', "
-#if !defined(HAVE_YASSL)
                             "but neither SSL nor RSA keys are "
-#else
-                            "but no SSL is "
-#endif
                             "configured. "
                             "Nobody can currently login using this account.",
                             sha256_password_plugin_name.str,
@@ -1543,8 +1498,18 @@ static my_bool acl_load(THD *thd, TABLE_LIST *tables)
    We need to check whether we are working with old database layout. This
    might be the case for instance when we are running mysql_upgrade.
   */
-  table_schema= user_table_schema_factory.get_user_table_schema(table);
-  is_old_db_layout= user_table_schema_factory.is_old_user_table_schema(table);
+  if (user_table_schema_factory.user_table_schema_check(table))
+  {
+    table_schema= user_table_schema_factory.get_user_table_schema(table);
+    is_old_db_layout= user_table_schema_factory.is_old_user_table_schema(table);
+  }
+  else
+  {
+    sql_print_error("[FATAL] mysql.user table is damaged. "
+                    "Please run mysql_upgrade.");
+    end_read_record(&read_record_info);
+    goto end;
+  }
 
   allow_all_hosts=0;
   int read_rec_errcode;
@@ -1573,8 +1538,8 @@ static my_bool acl_load(THD *thd, TABLE_LIST *tables)
                                       table->field[table_schema->host_idx()]));
     user.user= get_field(&global_acl_memory,
                          table->field[table_schema->user_idx()]);
-    if (check_no_resolve && hostname_requires_resolving(user.host.get_host()))
-    {
+  if (check_no_resolve && hostname_requires_resolving(user.host.get_host()) &&
+      strcmp(user.host.get_host(), "localhost") != 0) {
       sql_print_warning("'user' entry '%s@%s' "
                         "ignored in --skip-name-resolve mode.",
                         user.user ? user.user : "",
@@ -1895,8 +1860,15 @@ static my_bool acl_load(THD *thd, TABLE_LIST *tables)
   } // END while reading records from the mysql.user table
 
   end_read_record(&read_record_info);
+
+  DBUG_EXECUTE_IF("simulate_acl_init_failure",
+                  read_rec_errcode= HA_ERR_WRONG_IN_RECORD;);
+
   if (read_rec_errcode > 0)
+  {
+    table->file->print_error(read_rec_errcode, MYF(ME_ERRORLOG));
     goto end;
+  }
 
   std::sort(acl_users->begin(), acl_users->end(), ACL_compare());
   acl_users->shrink_to_fit();
@@ -1941,8 +1913,8 @@ static my_bool acl_load(THD *thd, TABLE_LIST *tables)
       continue;
     }
     db.user=get_field(&global_acl_memory, table->field[MYSQL_DB_FIELD_USER]);
-    if (check_no_resolve && hostname_requires_resolving(db.host.get_host()))
-    {
+    if (check_no_resolve && hostname_requires_resolving(db.host.get_host()) &&
+        strcmp(db.host.get_host(), "localhost") != 0) {
       sql_print_warning("'db' entry '%s %s@%s' "
                         "ignored in --skip-name-resolve mode.",
                         db.db,
@@ -1981,7 +1953,10 @@ static my_bool acl_load(THD *thd, TABLE_LIST *tables)
 
   end_read_record(&read_record_info);
   if (read_rec_errcode > 0)
+  {
+    table->file->print_error(read_rec_errcode, MYF(ME_ERRORLOG));
     goto end;
+  }
 
   std::sort(acl_dbs->begin(), acl_dbs->end(), ACL_compare());
   acl_dbs->shrink_to_fit();
@@ -2011,7 +1986,10 @@ static my_bool acl_load(THD *thd, TABLE_LIST *tables)
 
     end_read_record(&read_record_info);
     if (read_rec_errcode > 0)
+    {
+      table->file->print_error(read_rec_errcode, MYF(ME_ERRORLOG));
       goto end;
+    }
 
     std::sort(acl_proxy_users->begin(), acl_proxy_users->end(), ACL_compare());
   }
@@ -2480,8 +2458,8 @@ static my_bool grant_load(THD *thd, TABLE_LIST *tables)
 
       if (check_no_resolve)
       {
-        if (hostname_requires_resolving(mem_check->host.get_host()))
-        {
+        if (hostname_requires_resolving(mem_check->host.get_host()) &&
+            strcmp(mem_check->host.get_host(), "localhost") != 0) {
           sql_print_warning("'tables_priv' entry '%s %s@%s' "
                             "ignored in --skip-name-resolve mode.",
                             mem_check->tname,

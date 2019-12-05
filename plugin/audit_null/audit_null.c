@@ -1,14 +1,20 @@
-/* Copyright (c) 2010, 2016, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2010, 2019, Oracle and/or its affiliates. All rights reserved.
 
-   This program is free software; you can redistribute it and/or
-   modify it under the terms of the GNU General Public License as
-   published by the Free Software Foundation; version 2 of the
-   License.
+   This program is free software; you can redistribute it and/or modify
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-   GNU General Public License for more details.
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -87,6 +93,21 @@ LEX_CSTRING event_names[][6] = {
 };
 
 static volatile int number_of_calls;
+
+/*
+  Plugin has been installed.
+*/
+static my_bool g_plugin_installed= FALSE;
+
+/*
+  Record buffer mutex.
+*/
+static mysql_mutex_t g_record_buffer_mutex;
+
+/*
+  Event recording buffer.
+*/
+static char *g_record_buffer;
 
 #define AUDIT_NULL_VAR(x) static volatile int number_of_calls_ ## x;
 #include "audit_null_variables.h"
@@ -174,6 +195,13 @@ static int audit_null_plugin_init(void *arg MY_ATTRIBUTE((unused)))
     *((int*)var->value) = 0;
   }
 
+  mysql_mutex_init(PSI_NOT_INSTRUMENTED,
+                   &g_record_buffer_mutex,
+                   MY_MUTEX_INIT_FAST);
+
+  g_record_buffer= NULL;
+  g_plugin_installed= TRUE;
+
   return(0);
 }
 
@@ -193,6 +221,17 @@ static int audit_null_plugin_init(void *arg MY_ATTRIBUTE((unused)))
 
 static int audit_null_plugin_deinit(void *arg MY_ATTRIBUTE((unused)))
 {
+  if (g_plugin_installed == TRUE)
+  {
+    my_free((void *)(g_record_buffer));
+
+    g_record_buffer= NULL;
+
+    mysql_mutex_destroy(&g_record_buffer_mutex);
+
+    g_plugin_installed= FALSE;
+  }
+
   return(0);
 }
 
@@ -244,8 +283,8 @@ static LEX_CSTRING get_token(const char **str)
   return ret;
 }
 
-static void add_event(MYSQL_THD thd, const char *var, LEX_CSTRING event,
-                      const char *data, size_t data_length)
+static char *add_event(const char *var, LEX_CSTRING event,
+                       const char *data, size_t data_length)
 {
   LEX_CSTRING str;
   size_t size;
@@ -261,7 +300,7 @@ static void add_event(MYSQL_THD thd, const char *var, LEX_CSTRING event,
 
   buffer[size - (str.length == 0 ? 2 : 1)] = '\0';
 
-  THDVAR(thd, event_record)= buffer;
+  return buffer;
 }
 
 static void process_event_record(MYSQL_THD thd, LEX_CSTRING event_name,
@@ -282,11 +321,22 @@ static void process_event_record(MYSQL_THD thd, LEX_CSTRING event_name,
        a record variable */
 
     const char *buffer= THDVAR(thd, event_record);
+    char *new_buffer= NULL;
 
     /* Add event. */
-    add_event(thd, buffer, event_name, data, data_length);
+    mysql_mutex_lock(&g_record_buffer_mutex);
 
-    my_free((void *)(buffer));
+    /* Only one THD is capable of adding events into the buffer. */
+    if (buffer && (buffer == g_record_buffer))
+    {
+      new_buffer= add_event(buffer, event_name, data, data_length);
+      g_record_buffer= new_buffer;
+      my_free((void *)(buffer));
+    }
+
+    mysql_mutex_unlock(&g_record_buffer_mutex);
+
+    THDVAR(thd, event_record)= new_buffer;
 
     if (!my_charset_latin1.coll->strnncoll(&my_charset_latin1,
                                            (const uchar *)record_begin.str,
@@ -315,11 +365,18 @@ static void process_event_record(MYSQL_THD thd, LEX_CSTRING event_name,
 
     buffer= THDVAR(thd, event_record);
 
-    my_free((void *)(buffer));
+    mysql_mutex_lock(&g_record_buffer_mutex);
 
-    THDVAR(thd, event_record)= 0;
+    if (buffer == g_record_buffer)
+    {
+      my_free((void *)(buffer));
 
-    add_event(thd, "", event_name, data, data_length);
+      g_record_buffer= add_event("", event_name, data, data_length);
+
+      THDVAR(thd, event_record)= g_record_buffer;
+    }
+
+    mysql_mutex_unlock(&g_record_buffer_mutex);
 
     /* Add event. */
 

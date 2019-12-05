@@ -1,13 +1,20 @@
-/* Copyright (c) 2013, 2016, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2013, 2018, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -87,11 +94,15 @@ public:
     lex->pop_context();
     pc->select->n_child_sum_items += child->n_sum_items;
     /*
-      A subselect can add fields to an outer select. Reserve space for
-      them.
+      A subquery (and all the subsequent query blocks in a UNION) can add
+      columns to an outer query block. Reserve space for them.
     */
-    pc->select->select_n_where_fields+= child->select_n_where_fields;
-    pc->select->select_n_having_items+= child->select_n_having_items;
+    for (SELECT_LEX *temp = child; temp != NULL;
+         temp = temp->next_select())
+    {
+      pc->select->select_n_where_fields+= temp->select_n_where_fields;
+      pc->select->select_n_having_items+= temp->select_n_having_items;
+    }
     value= query_expression_body->value;
     return false;
   }
@@ -1180,7 +1191,9 @@ class PT_internal_variable_name_2d : public PT_internal_variable_name
 {
   typedef PT_internal_variable_name super;
 
-  POS pos;
+public:
+  const POS pos;
+private:
   LEX_STRING ident1;
   LEX_STRING ident2;
 
@@ -1349,6 +1362,11 @@ public:
 
     THD *thd= pc->thd;
     struct sys_var_with_base tmp= name->value;
+    if (tmp.var == trg_new_row_fake_var)
+    {
+      error(pc, down_cast<PT_internal_variable_name_2d *>(name)->pos);
+      return true;
+    }
     /* Lookup if necessary: must be a system variable. */
     if (tmp.var == NULL)
     {
@@ -1713,7 +1731,7 @@ class PT_transaction_access_mode : public PT_transaction_characteristic
 
 public:
   explicit PT_transaction_access_mode(bool is_read_only)
-  : super("tx_read_only", (int32) is_read_only)
+  : super("transaction_read_only", (int32) is_read_only)
   {}
 };
 
@@ -1724,7 +1742,7 @@ class PT_isolation_level : public PT_transaction_characteristic
 
 public:
   explicit PT_isolation_level(enum_tx_isolation level)
-  : super("tx_isolation", (int32) level)
+  : super("transaction_isolation", (int32) level)
   {}
 };
 

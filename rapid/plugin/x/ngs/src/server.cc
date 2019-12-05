@@ -1,15 +1,21 @@
 /*
  * Copyright (c) 2015, 2017 Oracle and/or its affiliates. All rights reserved.
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; version 2 of the
- * License.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License, version 2.0,
+ * as published by the Free Software Foundation.
+ *
+ * This program is also distributed with certain software (including
+ * but not limited to OpenSSL) that is licensed under separate terms,
+ * as designated in a particular file or component or in included license
+ * documentation.  The authors of MySQL hereby grant you an additional
+ * permission to link the program and your derivative works with the
+ * separately licensed software that they have included with MySQL.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License, version 2.0, for more details.
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
@@ -351,7 +357,8 @@ Authentication_handler_ptr Server::get_auth_handler(const std::string &name, Ses
 
 void Server::get_authentication_mechanisms(std::vector<std::string> &auth_mech, Client_interface &client)
 {
-  bool tls_active = client.connection().options()->active_tls();
+  const Connection_type type      = client.connection().connection_type();
+  const bool            is_secure = Connection_type_helper::is_secure_type(type);
 
   auth_mech.clear();
 
@@ -361,7 +368,7 @@ void Server::get_authentication_mechanisms(std::vector<std::string> &auth_mech, 
 
   while (m_auth_handlers.end() != i)
   {
-    if (i->first.should_be_tls_active == tls_active)
+    if (i->first.must_be_secure_connection == is_secure)
       auth_mech.push_back(i->first.name);
     ++i;
   }

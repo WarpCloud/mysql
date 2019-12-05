@@ -1,13 +1,20 @@
-/* Copyright (c) 2013, 2016, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2013, 2018, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software Foundation,
@@ -20,6 +27,7 @@
 #include "my_global.h"
 #include "binlog.h"           // LOG_INFO
 #include "binlog_event.h"     // enum_binlog_checksum_alg, Log_event_type
+#include "m_string.h"
 #include "mysqld_error.h"     // ER_*
 #include "sql_error.h"        // Diagnostics_area
 
@@ -366,9 +374,8 @@ private:
   bool has_error() { return m_errno != 0; }
   void set_error(int errorno, const char *errmsg)
   {
-    // Need to set the final '\0' since strncpy does not do that.
-    strncpy(m_errmsg_buf, errmsg, sizeof(m_errmsg_buf) - 1);
-    m_errmsg_buf[sizeof(m_errmsg_buf) - 1]= '\0';
+    my_snprintf(m_errmsg_buf, sizeof(m_errmsg_buf), "%.*s",
+                MYSQL_ERRMSG_SIZE - 1, errmsg);
     m_errmsg= m_errmsg_buf;
     m_errno= errorno;
   }

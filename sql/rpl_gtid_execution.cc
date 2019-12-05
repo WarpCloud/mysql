@@ -1,14 +1,20 @@
-/* Copyright (c) 2011, 2016, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2011, 2017, Oracle and/or its affiliates. All rights reserved.
 
-   This program is free software; you can redistribute it and/or
-   modify it under the terms of the GNU General Public License as
-   published by the Free Software Foundation; version 2 of the
-   License.
+   This program is free software; you can redistribute it and/or modify
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
 
-   This program is distributed in the hope that it will be useful, but
-   WITHOUT ANY WARRANTY; without even the implied warranty of
-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-   General Public License for more details.
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -113,9 +119,9 @@ bool set_gtid_next(THD *thd, const Gtid_specification &spec)
         */
         break;
       }
-      my_thread_id owner= gtid_state->get_owner(spec.gtid);
+
       // GTID not owned by anyone: acquire ownership
-      if (owner == 0)
+      if (!gtid_state->is_owned(spec.gtid))
       {
         // acquire_ownership can't fail
         gtid_state->acquire_ownership(thd, spec.gtid);
@@ -436,8 +442,10 @@ static bool is_stmt_innocent(const THD *thd)
   bool is_select= (sql_command == SQLCOM_SELECT);
   bool is_do= (sql_command == SQLCOM_DO);
   bool is_empty= (sql_command == SQLCOM_EMPTY_QUERY);
+  bool is_use= (sql_command == SQLCOM_CHANGE_DB);
   return
-    (is_set || is_select || is_do || is_show || is_empty) &&
+    (is_set || is_select || is_do || is_show || is_empty ||
+     is_use) &&
     !lex->uses_stored_routines();
 }
 

@@ -1,14 +1,22 @@
 /*****************************************************************************
 
-Copyright (c) 1996, 2017, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1996, 2019, Oracle and/or its affiliates. All Rights Reserved.
 
-This program is free software; you can redistribute it and/or modify it under
-the terms of the GNU General Public License as published by the Free Software
-Foundation; version 2 of the License.
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License, version 2.0,
+as published by the Free Software Foundation.
 
-This program is distributed in the hope that it will be useful, but WITHOUT
-ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
-FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+This program is also distributed with certain software (including
+but not limited to OpenSSL) that is licensed under separate terms,
+as designated in a particular file or component or in included license
+documentation.  The authors of MySQL hereby grant you an additional
+permission to link the program and your derivative works with the
+separately licensed software that they have included with MySQL.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License, version 2.0, for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
@@ -251,7 +259,7 @@ trx_purge_sys_create(
 	here only because the query threads code requires it. It is otherwise
 	quite unnecessary. We should get rid of it eventually. */
 	purge_sys->trx->id = 0;
-	purge_sys->trx->start_time = ut_time();
+	purge_sys->trx->start_time = ut_time_monotonic();
 	purge_sys->trx->state = TRX_STATE_ACTIVE;
 	purge_sys->trx->op_info = "purge trx";
 
@@ -905,7 +913,7 @@ trx_purge_mark_undo_for_truncate(
 	b. At-least 2 UNDO redo rseg/undo logs (besides the default rseg-0)
 	b. At-least 1 UNDO tablespace size > threshold. */
 	if (srv_undo_tablespaces_active < 2
-	    || (srv_undo_logs < (1 + srv_tmp_undo_logs + 2))) {
+	    || (srv_rollback_segments < (1 + srv_tmp_undo_logs + 2))) {
 		return;
 	}
 
@@ -1295,6 +1303,7 @@ trx_purge_rseg_get_next_history_log(
 		mutex_exit(&(rseg->mutex));
 		mtr_commit(&mtr);
 
+#ifdef UNIV_DEBUG
 		trx_sys_mutex_enter();
 
 		/* Add debug code to track history list corruption reported
@@ -1308,14 +1317,19 @@ trx_purge_rseg_get_next_history_log(
 		if (trx_sys->rseg_history_len > 2000000) {
 			ib::warn() << "Purge reached the head of the history"
 				" list, but its length is still reported as "
-				<< trx_sys->rseg_history_len << "! Make"
-				" a detailed bug report, and submit it to"
-				" http://bugs.mysql.com";
-			ut_ad(0);
+				<< trx_sys->rseg_history_len << " which is"
+				" unusually high.";
+			ib::info() << "This can happen for multiple reasons";
+			ib::info() << "1. A long running transaction is"
+				" withholding purging of undo logs or a read"
+				" view is open. Please try to commit the long"
+				" running transaction.";
+			ib::info() << "2. Try increasing the number of purge"
+				" threads to expedite purging of undo logs.";
 		}
 
 		trx_sys_mutex_exit();
-
+#endif
 		return;
 	}
 

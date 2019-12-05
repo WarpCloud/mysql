@@ -1,13 +1,25 @@
-/* Copyright (c) 2011, 2016, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2011, 2017, Oracle and/or its affiliates. All rights reserved.
 
   This program is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; version 2 of the License.
+  it under the terms of the GNU General Public License, version 2.0,
+  as published by the Free Software Foundation.
+
+  This program is also distributed with certain software (including
+  but not limited to OpenSSL) that is licensed under separate terms,
+  as designated in a particular file or component or in included license
+  documentation.  The authors of MySQL hereby grant you an additional
+  permission to link the program and your derivative works with the
+  separately licensed software that they have included with MySQL.
+
+  Without limiting anything contained in the foregoing, this file,
+  which is part of C Driver for MySQL (Connector/C), is also subject to the
+  Universal FOSS Exception, version 1.0, a copy of which can be found at
+  http://oss.oracle.com/licenses/universal-foss-exception.
 
   This program is distributed in the hope that it will be useful,
   but WITHOUT ANY WARRANTY; without even the implied warranty of
   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
+  GNU General Public License, version 2.0, for more details.
 
   You should have received a copy of the GNU General Public License
   along with this program; if not, write to the Free Software Foundation,
@@ -471,6 +483,14 @@ static void end_file_close_wait_noop(PSI_file_locker *locker NNN,
   return;
 }
 
+static void end_file_rename_wait_noop(PSI_file_locker *locker NNN,
+                                      const char *old_name NNN,
+                                      const char *new_name NNN,
+                                      int result NNN)
+{
+  return;
+}
+
 static PSI_stage_progress*
 start_stage_noop(PSI_stage_key key NNN,
                  const char *src_file NNN, int src_line NNN)
@@ -737,6 +757,12 @@ execute_prepare_stmt_noop(PSI_statement_locker *locker NNN,
   return;
 }
 
+static void set_prepared_stmt_text_noop(PSI_prepared_stmt *prepared_stmt NNN,
+                                        const char *text NNN, uint text_len NNN)
+{
+  return;
+}
+
 void
 destroy_prepared_stmt_noop(PSI_prepared_stmt *prepared_stmt NNN)
 {
@@ -948,6 +974,7 @@ static PSI PSI_noop=
   end_file_wait_noop,
   start_file_close_wait_noop,
   end_file_close_wait_noop,
+  end_file_rename_wait_noop,
   start_stage_noop,
   get_current_stage_progress_noop,
   end_stage_noop,
@@ -991,6 +1018,7 @@ static PSI PSI_noop=
   destroy_prepared_stmt_noop,
   reprepare_prepared_stmt_noop,
   execute_prepare_stmt_noop,
+  set_prepared_stmt_text_noop,
   digest_start_noop,
   digest_end_noop,
   set_thread_connect_attrs_noop,

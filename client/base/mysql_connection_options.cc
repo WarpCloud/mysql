@@ -1,14 +1,21 @@
 /*
-   Copyright (c) 2014, 2016, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -21,6 +28,7 @@
 #include "mysql_connection_options.h"
 #include "abstract_program.h"
 #include <mysys_err.h>
+#include "caching_sha2_passwordopt-vars.h"
 
 using Mysql::Tools::Base::Abstract_program;
 using namespace Mysql::Tools::Base::Options;
@@ -112,6 +120,11 @@ void Mysql_connection_options::create_options()
     "Directory for client-side plugins.");
   this->create_new_option(&this->m_default_auth, "default_auth",
     "Default authentication client-side plugin to use.");
+  this->create_new_option(&this->m_server_public_key, "server_public_key_path",
+                          "Path to file containing server public key");
+  this->create_new_option(&this->m_get_server_public_key,
+                          "get-server-public-key",
+                          "Get public key from server");
 }
 
 MYSQL* Mysql_connection_options::create_connection()
@@ -156,6 +169,17 @@ MYSQL* Mysql_connection_options::create_connection()
   mysql_options(connection, MYSQL_OPT_CONNECT_ATTR_RESET, 0);
   mysql_options4(connection, MYSQL_OPT_CONNECT_ATTR_ADD,
                   "program_name", this->m_program->get_name().c_str());
+
+  if (this->m_server_public_key.has_value())
+  {
+    opt_server_public_key=
+      const_cast <char *> (this->m_server_public_key.value().c_str());
+  }
+
+  opt_get_server_public_key= this->m_get_server_public_key ? TRUE : FALSE;
+
+  set_server_public_key(connection);
+  set_get_server_public_key_option(connection);
 
   if (!mysql_real_connect(connection,
     this->get_null_or_string(this->m_host),

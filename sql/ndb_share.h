@@ -1,14 +1,21 @@
 /*
-   Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2011, 2017, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -38,9 +45,11 @@ enum Ndb_binlog_type
   ,NBT_NO_LOGGING               = 1
   ,NBT_UPDATED_ONLY             = 2
   ,NBT_FULL                     = 3
-  ,NBT_USE_UPDATE               = 4 /* bit 0x4 indicates USE_UPDATE */
-  ,NBT_UPDATED_ONLY_USE_UPDATE  = NBT_UPDATED_ONLY | NBT_USE_UPDATE
-  ,NBT_FULL_USE_UPDATE          = NBT_FULL         | NBT_USE_UPDATE
+  ,NBT_USE_UPDATE               = 4
+  ,NBT_UPDATED_ONLY_USE_UPDATE  = 6
+  ,NBT_FULL_USE_UPDATE          = 7
+  ,NBT_UPDATED_ONLY_MINIMAL     = 8
+  ,NBT_UPDATED_FULL_MINIMAL     = 9
 };
 #endif
 
@@ -138,6 +147,8 @@ set_ndb_share_state(NDB_SHARE *share, NDB_SHARE_STATE state)
 #define NSF_BINLOG_FULL 8u /* table should be binlogged with full rows */
 #define NSF_BINLOG_USE_UPDATE 16u  /* table update should be binlogged using
                                      update log event */
+#define NSF_BINLOG_MINIMAL_UPDATE 32u  /* table update should be binlogged using
+                              minimal format: before(PK):after(changed cols) */
 inline void set_binlog_logging(NDB_SHARE *share)
 {
   DBUG_PRINT("info", ("set_binlog_logging"));
@@ -175,6 +186,16 @@ inline void set_binlog_use_update(NDB_SHARE *share)
 inline my_bool get_binlog_use_update(NDB_SHARE *share)
 { return (share->flags & NSF_BINLOG_USE_UPDATE) != 0; }
 
+static inline void set_binlog_update_minimal(NDB_SHARE *share)
+{
+  DBUG_PRINT("info", ("set_binlog_update_minimal"));
+  share->flags|= NSF_BINLOG_MINIMAL_UPDATE;
+}
+
+static inline bool get_binlog_update_minimal(const NDB_SHARE *share)
+{
+  return (share->flags & NSF_BINLOG_MINIMAL_UPDATE) != 0;
+}
 
 NDB_SHARE *ndbcluster_get_share(const char *key,
                                 struct TABLE *table,

@@ -17,13 +17,21 @@ documentation. The contributions by Percona Inc. are incorporated with
 their permission, and subject to the conditions contained in the file
 COPYING.Percona.
 
-This program is free software; you can redistribute it and/or modify it under
-the terms of the GNU General Public License as published by the Free Software
-Foundation; version 2 of the License.
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License, version 2.0,
+as published by the Free Software Foundation.
 
-This program is distributed in the hope that it will be useful, but WITHOUT
-ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
-FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+This program is also distributed with certain software (including
+but not limited to OpenSSL) that is licensed under separate terms,
+as designated in a particular file or component or in included license
+documentation.  The authors of MySQL hereby grant you an additional
+permission to link the program and your derivative works with the
+separately licensed software that they have included with MySQL.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License, version 2.0, for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc.,
@@ -2454,21 +2462,31 @@ files_checked:
 	running in single threaded mode essentially. Only the IO threads
 	should be running at this stage. */
 
+	/* Deprecate innodb_undo_logs.  But still use it if it is set to
+	non-default and innodb_rollback_segments is default. */
+	ut_a(srv_rollback_segments > 0);
+	ut_a(srv_rollback_segments <= TRX_SYS_N_RSEGS);
 	ut_a(srv_undo_logs > 0);
 	ut_a(srv_undo_logs <= TRX_SYS_N_RSEGS);
+	if (srv_undo_logs < TRX_SYS_N_RSEGS) {
+		ib::warn() << deprecated_undo_logs;
+		if (srv_rollback_segments == TRX_SYS_N_RSEGS) {
+			srv_rollback_segments = srv_undo_logs;
+		}
+	}
 
 	/* The number of rsegs that exist in InnoDB is given by status
 	variable srv_available_undo_logs. The number of rsegs to use can
-	be set using the dynamic global variable srv_undo_logs. */
+	be set using the dynamic global variable srv_rollback_segments. */
 
 	srv_available_undo_logs = trx_sys_create_rsegs(
-		srv_undo_tablespaces, srv_undo_logs, srv_tmp_undo_logs);
+		srv_undo_tablespaces, srv_rollback_segments, srv_tmp_undo_logs);
 
 	if (srv_available_undo_logs == ULINT_UNDEFINED) {
 		/* Can only happen if server is read only. */
 		ut_a(srv_read_only_mode);
-		srv_undo_logs = ULONG_UNDEFINED;
-	} else if (srv_available_undo_logs < srv_undo_logs
+		srv_rollback_segments = ULONG_UNDEFINED;
+	} else if (srv_available_undo_logs < srv_rollback_segments
 		   && !srv_force_recovery && !recv_needed_recovery) {
 		ib::error() << "System or UNDO tablespace is running of out"
 			    << " of space";

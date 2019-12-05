@@ -4604,6 +4604,95 @@ change_cond_ref_to_const(THD *thd, I_List<COND_CMP> *save_list,
   return false;
 }
 
+static bool
+change_cond_ref_to_null(THD *thd, Item *cond,
+                        Item *field, Item *value)
+{
+  if (cond->type() == Item::COND_ITEM)
+  {
+    Item_cond *const item_cond= down_cast<Item_cond *>(cond);
+    List_iterator<Item> li(*item_cond->argument_list());
+    Item *item;
+    while ((item=li++))
+    {
+      if (change_cond_ref_to_null(thd, item, field, value))
+        return true;
+    }
+    return false;
+  }
+  if (cond->eq_cmp_result() == Item::COND_OK) {
+    return false;                // Not a boolean function
+  }
+
+  Item_bool_func2 *func= down_cast<Item_bool_func2 *>(cond);
+  Item **args= func->arguments();
+  Item *left_item=  args[0];
+  Item *right_item= args[1];
+
+  if (right_item->eq(field,0) && left_item != value)
+  {
+    Item *const clone= value->clone_item();
+    if (thd->is_error())
+      return true;
+
+    if (clone == NULL)
+      return false;
+
+    clone->collation.set(right_item->collation);
+    thd->change_item_tree(args + 1, clone);
+    func->update_used_tables();
+    if (func->set_cmp_func())
+      return true;
+  }
+  if (left_item->eq(field,0) && right_item != value)
+  {
+    Item *const clone= value->clone_item();
+    if (thd->is_error())
+      return true;
+
+    if (clone == NULL)
+      return false;
+
+    clone->collation.set(left_item->collation);
+    thd->change_item_tree(args, clone);
+    func->update_used_tables();
+    if (func->set_cmp_func())
+      return true;
+  }
+  return false;
+}
+
+static bool
+propagate_cond_null(THD *thd, Item *and_father, Item *cond)
+{
+  if (cond->type() == Item::COND_ITEM)
+  {
+    Item_cond *const item_cond= down_cast<Item_cond *>(cond);
+    bool and_level= item_cond->functype() == Item_func::COND_AND_FUNC;
+    List_iterator_fast<Item> li(*item_cond->argument_list());
+    Item *item;
+    while ((item=li++))
+    {
+      if (propagate_cond_null(thd, and_level ? cond : item, item))
+        return true;
+    }
+  }
+  else if (and_father != cond && !cond->marker)		// In a AND group
+  {
+    Item_func *func;
+    if (cond->type() == Item::FUNC_ITEM &&
+        (func = down_cast<Item_func *>(cond))
+        && func->functype() == Item_func::ISNULL_FUNC) {
+      Item **args = func->arguments();
+      Item *null_item = new Item_null();
+      if (change_cond_ref_to_null(thd, and_father, args[0], null_item))
+        return true;
+    }
+  }
+
+  return false;
+}
+
 /**
   Propagate constant values in a condition
 
@@ -9959,6 +10048,19 @@ bool optimize_cond(THD *thd, Item **cond, COND_EQUAL **cond_equal,
     This is performed for the WHERE condition and any join conditions, but
     not for the HAVING condition.
   */
+  if (optimizer_flag(thd, OPTIMIZER_SWITCH_PROPAGATE_NULL) && *cond)
+  {
+    Opt_trace_object step_wrapper(trace);
+    step_wrapper.add_alnum("transformation", "null_propagation");
+    {
+      Opt_trace_disable_I_S
+              disable_trace_wrapper(trace, !(*cond)->has_subquery());
+      Opt_trace_array trace_subselect(trace, "subselect_evaluation");
+      if (propagate_cond_null(thd, *cond, *cond))
+        DBUG_RETURN(true);
+    }
+    step_wrapper.add("resulting_condition", *cond);
+  }
   if (join_list)
   {
     Opt_trace_object step_wrapper(trace);

@@ -2374,10 +2374,11 @@ void Optimize_table_order::consider_plan(uint             idx,
       join->sort_by_table !=
       join->positions[join->const_tables].table->table())
   {
-    cost+= join->positions[idx].prefix_rowcount;
-    trace_obj->add("sort_cost", join->positions[idx].prefix_rowcount).
+      ulong order_cost_factor = join->thd ? join->thd->variables.optimizer_order_cost_factor : 1;
+      cost+= join->positions[idx].prefix_rowcount * order_cost_factor;
+      trace_obj->add("sort_cost", join->positions[idx].prefix_rowcount * order_cost_factor).
       add("new_cost_for_plan", cost);
-    sort_cost= join->positions[idx].prefix_rowcount;
+      sort_cost= join->positions[idx].prefix_rowcount * order_cost_factor;
   }
 
 

@@ -2179,6 +2179,17 @@ protected:
   virtual ~Create_func_instr() {}
 };
 
+class Create_func_regexp_substr : public Create_func_arg2
+{
+public:
+    virtual Item *create(THD *thd, Item *arg1, Item *arg2);
+
+    static Create_func_regexp_substr s_singleton;
+
+protected:
+    Create_func_regexp_substr() {}
+    virtual ~Create_func_regexp_substr() {}
+};
 
 class Create_func_interiorringn : public Create_func_arg2
 {
@@ -3391,6 +3402,20 @@ public:
 protected:
   Create_func_pow() {}
   virtual ~Create_func_pow() {}
+};
+
+
+class Create_func_priv_user : public Create_native_func
+{
+public:
+    virtual Item *create_native(THD *thd, LEX_STRING name,
+                                PT_item_list *item_list);
+
+    static Create_func_priv_user s_singleton;
+
+protected:
+    Create_func_priv_user() {}
+    virtual ~Create_func_priv_user() {}
 };
 
 
@@ -5611,6 +5636,13 @@ Create_func_instr::create(THD *thd, Item *arg1, Item *arg2)
   return new (thd->mem_root) Item_func_instr(POS(), arg1, arg2);
 }
 
+Create_func_regexp_substr Create_func_regexp_substr::s_singleton;
+
+Item*
+Create_func_regexp_substr::create(THD *thd, Item *arg1, Item *arg2)
+{
+  return new (thd->mem_root) Item_func_regexp_substr(POS(), arg1, arg2);
+}
 
 Create_func_interiorringn Create_func_interiorringn::s_singleton;
 
@@ -6882,6 +6914,16 @@ Create_func_pow::create(THD *thd, Item *arg1, Item *arg2)
 }
 
 
+Create_func_priv_user Create_func_priv_user::s_singleton;
+
+Item *
+Create_func_priv_user::create_native(THD *thd, LEX_STRING name,
+                                     PT_item_list *item_list)
+{
+  return new (thd->mem_root) Item_func_priv_user(POS());
+}
+
+
 Create_func_quote Create_func_quote::s_singleton;
 
 Item*
@@ -7589,6 +7631,7 @@ static Native_func_registry func_array[] =
   { { C_STRING_WITH_LEN("IS_IPV4_COMPAT") }, BUILDER(Create_func_is_ipv4_compat)},
   { { C_STRING_WITH_LEN("IS_IPV4_MAPPED") }, BUILDER(Create_func_is_ipv4_mapped)},
   { { C_STRING_WITH_LEN("INSTR") }, BUILDER(Create_func_instr)},
+  { { C_STRING_WITH_LEN("REGEXP_SUBSTR") }, BUILDER(Create_func_regexp_substr)},
   { { C_STRING_WITH_LEN("INTERIORRINGN") }, GEOM_BUILDER(Create_func_interiorringn_deprecated)},
   { { C_STRING_WITH_LEN("INTERSECTS") }, GEOM_BUILDER(Create_func_intersects_deprecated)},
   { { C_STRING_WITH_LEN("ISCLOSED") }, GEOM_BUILDER(Create_func_isclosed_deprecated)},
@@ -7692,6 +7735,7 @@ static Native_func_registry func_array[] =
   { { C_STRING_WITH_LEN("POLYGONFROMWKB") }, GEOM_BUILDER(Create_func_polygonfromwkb_deprecated)},
   { { C_STRING_WITH_LEN("POW") }, BUILDER(Create_func_pow)},
   { { C_STRING_WITH_LEN("POWER") }, BUILDER(Create_func_pow)},
+  { { C_STRING_WITH_LEN("PRIV_USER") }, BUILDER(Create_func_priv_user)},
   { { C_STRING_WITH_LEN("QUOTE") }, BUILDER(Create_func_quote)},
   { { C_STRING_WITH_LEN("RADIANS") }, BUILDER(Create_func_radians)},
   { { C_STRING_WITH_LEN("RAND") }, BUILDER(Create_func_rand)},

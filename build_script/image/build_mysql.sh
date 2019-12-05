@@ -3,7 +3,7 @@ function NOT_ALLOWED_BRANCH_TEST() {
   if [[ ${CI_PROJECT_NAMESPACE} != "OLTP" ]]; then
     for br in ${RELEASE_BR[@]}; do
       if [[ ${BRANCH_NAME} == ${br} ]]; then
-        echo "merge your branch, ${BRANCH_NAME}@${CI_PROJECT_NAMESPACE}/mariadb, into ${BRANCH_NAME}@OLTP/mariadb"
+        echo "merge your branch, ${BRANCH_NAME}@${CI_PROJECT_NAMESPACE}/mysql, into ${BRANCH_NAME}@OLTP/mysql"
         exit 1
       fi
     done

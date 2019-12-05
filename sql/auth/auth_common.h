@@ -597,6 +597,8 @@ void acl_log_connect(const char *user, const char *host, const char *auth_as,
 enum enum_server_command command);
 int acl_authenticate(THD *thd, enum_server_command command);
 bool acl_check_host(const char *host, const char *ip);
+// support for change the effective user id
+int change_effective_user(THD *thd);
 
 /*
   User Attributes are the once which are defined during CREATE/ALTER/GRANT

@@ -2570,6 +2570,89 @@ acl_authenticate(THD *thd, enum_server_command command)
   DBUG_RETURN(0);
 }
 
+/**
+ Change the effective user, updating sctx variables such as priv user and
+ master access.
+
+ This is different from COM_CHANGE_USER, which requires re-authentication.
+ This function only checks for the proxy privilege and update the acl user
+ as needed.
+
+@param thd                     thread handle
+*/
+int change_effective_user(THD *thd) {
+  Security_context *sctx = thd->security_context();
+  LEX *const lex = thd->lex;
+  LEX_USER *target_user = lex->grant_user;
+  LEX_CSTRING auth_user = sctx->user();
+  ACL_PROXY_USER *proxy_user = NULL;
+  ACL_USER *acl_user = NULL;
+  const char *proxied_host = "%";
+  DBUG_ENTER("handle_change_user_cmd");
+
+  if (!target_user || !(target_user->user.length)) {
+    thd->set_row_count_func(0);
+    thd->get_stmt_da()->set_error_status(ER_ACCESS_DENIED_ERROR,
+                                         "No Target User Specified",
+                                         "HY000");
+    DBUG_RETURN(1);
+  }
+
+  if (!target_user->host.length || strcmp(target_user->host.str, "%")) {
+    thd->set_row_count_func(0);
+    thd->get_stmt_da()->set_error_status(ER_ACCESS_DENIED_ERROR,
+                                         "Change User to a Specific Host Not Allowed",
+                                         "HY000");
+    DBUG_RETURN(1);
+  }
+
+  // an authenticated user is allowed to proxy as himself. yet still need to look up
+  // the acl list to keep the auth info updated
+  mysql_mutex_lock(&acl_cache->lock);
+  if (strcmp(target_user->user.str, auth_user.str)) {
+    proxy_user = acl_check_proxy_user(auth_user.str,
+                                      sctx->host().str,
+                                      sctx->ip().str,
+                                      target_user->user.str);
+    if (!proxy_user) {
+      mysql_mutex_unlock(&acl_cache->lock);
+      thd->set_row_count_func(0);
+      thd->get_stmt_da()->set_error_status(ER_ACCESS_DENIED_ERROR, "Access Denied", "HY000");
+      DBUG_RETURN(1);
+    }
+    // we want to respect the proxy privilege definition. but to avoid confusion,
+    // the proxied host should always be set to '%'
+    proxied_host = proxy_user->get_proxied_host();
+  } else {
+    // if the user want to change to oneself, the host would be the one
+    // for which has been authenticated
+    proxied_host = sctx->host_or_ip().str;
+  }
+
+  acl_user = find_acl_user(proxied_host, target_user->user.str, TRUE);
+  if (!acl_user) {
+    mysql_mutex_unlock(&acl_cache->lock);
+    thd->set_row_count_func(0);
+    thd->get_stmt_da()->set_error_status(ER_ACCESS_DENIED_ERROR, "Target User Not Found", "HY000");
+    DBUG_RETURN(1);
+  }
+  sctx->set_master_access(acl_user->access);
+  assign_priv_user_host(sctx, acl_user);
+  mysql_mutex_unlock(&acl_cache->lock);
+  // update db access to the new user's
+  ulong db_access = 0;
+  if (thd->db().str) {
+    if (is_infoschema_db(thd->db().str, thd->db().length))
+      db_access = SELECT_ACL;
+    else
+      db_access = sctx->check_access(DB_ACLS) ? DB_ACLS :
+                  acl_get(sctx->host().str, sctx->ip().str, sctx->priv_user().str, thd->db().str, false) | sctx->master_access();
+  }
+  sctx->set_db_access(db_access);
+  my_ok(thd);
+  DBUG_RETURN(0);
+}
+
 bool is_secure_transport(int vio_type)
 {
   switch (vio_type)

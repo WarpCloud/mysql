@@ -25,6 +25,7 @@
 
 
 /* This file defines all string functions */
+#include <my_regex.h>
 #include "crypt_genhash_impl.h"       // CRYPT_MAX_PASSWORD_SIZE
 #include "item_func.h"                // Item_func
 
@@ -701,6 +702,23 @@ public:
   { return NAME_STRING("current_user()"); }
 };
 
+class Item_func_priv_user :public Item_func_user
+{
+    typedef Item_func_user super;
+
+    Name_resolution_context *context;
+
+public:
+    explicit Item_func_priv_user(const POS &pos) : super(pos) {}
+
+    // virtual bool itemize(Parse_context *pc, Item **res);
+
+    bool fix_fields(THD *thd, Item **ref);
+    const char *func_name() const { return "priv_user"; }
+    const Name_string fully_qualified_func_name() const
+    { return NAME_STRING("priv_user()"); }
+};
+
 
 class Item_func_soundex :public Item_str_func
 {
@@ -1336,6 +1354,28 @@ public:
   void fix_length_and_dec();
   const char *func_name() const{ return "gtid_subtract"; }
   String *val_str_ascii(String *);
+};
+
+class Item_func_regexp_substr :public Item_str_func
+{
+    my_regex_t preg;
+    bool regex_compiled;
+    bool regex_is_const;
+    String prev_regexp;
+    DTCollation cmp_collation;
+    const CHARSET_INFO *regex_lib_charset;
+    int regex_lib_flags;
+    String conv;
+    int regcomp(bool send_error);
+public:
+    Item_func_regexp_substr(const POS &pos, Item *a,Item *b) :Item_str_func(pos, a,b),
+                                                              regex_compiled(0),regex_is_const(0) {}
+    void cleanup();
+    String* val_str(String* str);
+    bool fix_fields(THD *thd, Item **ref);
+    void fix_length_and_dec();
+    const char *func_name() const { return "regexp_substr"; }
+    const CHARSET_INFO *compare_collation() { return cmp_collation.collation; }
 };
 
 #endif /* ITEM_STRFUNC_INCLUDED */

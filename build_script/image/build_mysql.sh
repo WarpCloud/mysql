@@ -25,8 +25,8 @@ function build_mysql() {
   fi
 
   ARCH=$(uname -i)
-  docker build -f ci/${ARCH}/Dockerfile -t mariadb-${ARCH} .
-  docker tag mariadb-${ARCH}:latest ${DOCKER_REPO_URL}/${BUILDER}/${COMPONENT_BASE}:${ARCH}-${IMAGE_TAG}
+  docker build -f ci/${ARCH}/Dockerfile -t mysql-${ARCH} .
+  docker tag mysql-${ARCH}:latest ${DOCKER_REPO_URL}/${BUILDER}/${COMPONENT_BASE}:${ARCH}-${IMAGE_TAG}
   docker push ${DOCKER_REPO_URL}/${BUILDER}/${COMPONENT_BASE}:${ARCH}-${IMAGE_TAG}
   docker tag ${DOCKER_REPO_URL}/${BUILDER}/${COMPONENT_BASE}:${ARCH}-${IMAGE_TAG} ${DOCKER_REPO_URL}/${BUILDER}/${COMPONENT_BASE}:${ARCH}-${BRANCH_NAME}
   docker push ${DOCKER_REPO_URL}/${BUILDER}/${COMPONENT_BASE}:${ARCH}-${BRANCH_NAME}

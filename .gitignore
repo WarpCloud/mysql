@@ -3122,3 +3122,5 @@ client/mysql_ssl_rsa_setup
 !include/*/boost/geometry/*
 
 .idea
+cmk-bld
+cmk-inst

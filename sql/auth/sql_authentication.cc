@@ -2570,6 +2570,8 @@ acl_authenticate(THD *thd, enum_server_command command)
   DBUG_RETURN(0);
 }
 
+#ifndef NO_EMBEDDED_ACCESS_CHECKS
+
 /**
  Change the effective user, updating sctx variables such as priv user and
  master access.
@@ -2652,6 +2654,8 @@ int change_effective_user(THD *thd) {
   my_ok(thd);
   DBUG_RETURN(0);
 }
+
+#endif /* NO_EMBEDDED_ACCESS_CHECKS */
 
 bool is_secure_transport(int vio_type)
 {

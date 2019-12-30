@@ -2819,7 +2819,7 @@ int init_common_variables()
     of SQLCOM_ constants.
   */
   compile_time_assert(sizeof(com_status_vars)/sizeof(com_status_vars[0]) - 1 ==
-                     SQLCOM_END + 6);
+                     SQLCOM_END + 7);
 #endif
 
   if (get_options(&remaining_argc, &remaining_argv))

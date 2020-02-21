@@ -8,20 +8,7 @@ RUN mkdir /root/mysql_bld && \
     make install && \
     cd /root && rm -fr mysql_bld mysql_srcs
 
-FROM 172.16.1.99/kundb/x86_64/debian:stretch AS release
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    curl \
-    vim \
-    busybox \
-    libgnutlsxx28 \
-    libaio1 \
-    libatomic1 \
-    libncurses5-dev \
-    unixodbc-dev \
-    libssl-dev \
-    && apt-get autoremove \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+FROM 172.16.1.99/kundb/x86_64/mysql_base:v2
 
 COPY --from=compile /usr/local/mysql57 /usr/local/mysql57
 

@@ -1,0 +1,90 @@
+connection default;
+create table t2 (col1 varchar(2), col2 varchar(2), primary key (col1));
+xa start '101', '100', 40;
+insert into t2 values ('aa','bb');
+xa end '101', '100', 40;
+xa prepare '101', '100', 40;
+xa commit '101', '100', 40 CTS 50101;
+xa start '102', '100', 40;
+insert into t2 values ('bb','aa');
+xa end '102', '100', 40;
+xa prepare '102', '100', 40;
+xa commit '102', '100', 40 CTS 50102;
+select * from t2 /*STS! 50100 */;
+col1	col2
+select * from t2 /*STS! 50101 */;
+col1	col2
+aa	bb
+select * from t2 /*STS! 50102 */;
+col1	col2
+aa	bb
+bb	aa
+alter table t2 add column col3 varchar(2);
+select * from t2 /*STS! 50100 */;
+col1	col2	col3
+select * from t2 /*STS! 50101 */;
+col1	col2	col3
+aa	bb	NULL
+select * from t2 /*STS! 50102 */;
+col1	col2	col3
+aa	bb	NULL
+bb	aa	NULL
+alter table t2 drop column col3;
+select * from t2 /*STS! 50100 */;
+col1	col2
+select * from t2 /*STS! 50101 */;
+col1	col2
+aa	bb
+select * from t2 /*STS! 50102 */;
+col1	col2
+aa	bb
+bb	aa
+alter table t2 drop primary key;
+select * from t2 /*STS! 50102 */;
+col1	col2
+select * from t2 /*STS! 50103 */;
+col1	col2
+aa	bb
+bb	aa
+delete from t2;
+xa start '101', '100', 40;
+insert into t2 values ('aa','bb');
+xa end '101', '100', 40;
+xa prepare '101', '100', 40;
+xa commit '101', '100', 40 CTS 50201;
+xa start '102', '100', 40;
+insert into t2 values ('bb','aa');
+xa end '102', '100', 40;
+xa prepare '102', '100', 40;
+xa commit '102', '100', 40 CTS 50202;
+alter table t2 add column col3 varchar(2);
+select * from t2 /*STS! 50200 */;
+col1	col2	col3
+select * from t2 /*STS! 50201 */;
+col1	col2	col3
+aa	bb	NULL
+select * from t2 /*STS! 50202 */;
+col1	col2	col3
+aa	bb	NULL
+bb	aa	NULL
+alter table t2 drop column col3;
+select * from t2 /*STS! 50200 */;
+col1	col2
+select * from t2 /*STS! 50201 */;
+col1	col2
+aa	bb
+select * from t2 /*STS! 50202 */;
+col1	col2
+aa	bb
+bb	aa
+alter table t2 add primary key (col1);
+select * from t2 /*STS! 50200 */;
+col1	col2
+select * from t2 /*STS! 50201 */;
+col1	col2
+aa	bb
+select * from t2 /*STS! 50202 */;
+col1	col2
+aa	bb
+bb	aa
+drop table t2;

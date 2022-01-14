@@ -1,0 +1,669 @@
+#--source include/have_log_bin.inc
+
+connect (con1,localhost,root,,);
+connect (con2,localhost,root,,);
+connect (con3,localhost,root,,);
+
+#
+# A set of test cases that verifies global mvcc feature based on tso
+
+# init
+--echo connection default;
+connection default;
+
+CREATE TABLE history (
+  hist_id int DEFAULT NULL,
+#  h_c_id int DEFAULT NULL,
+#  h_c_d_id int DEFAULT NULL,
+   h_c_w_id int DEFAULT NULL,
+#  h_d_id int DEFAULT NULL,
+#  h_w_id int DEFAULT NULL,
+#  h_date timestamp NULL DEFAULT NULL,
+#  h_amount decimal(6,2) DEFAULT NULL,
+#  h_data varchar(24) DEFAULT NULL,
+  KEY i_h_c_w_id (h_c_w_id)
+) ENGINE=InnoDB;
+
+# insert row
+# blocking read rows modified by a transaction who is in prepared state
+
+xa start 'tst';
+INSERT INTO history (hist_id, h_c_w_id) VALUES(1, 90001);
+INSERT INTO history (hist_id, h_c_w_id) VALUES(2, 90002);
+xa end 'tst';
+xa prepare 'tst';
+
+--echo connection con1
+connection con1;
+xa start 'wht' /*STS! 426807937862210002 */;
+send select * from history ;
+
+--echo connection con2
+connection con2;
+begin;
+send select * from history;
+
+--echo connection con3
+connection con3;
+begin;
+send select * from history /*STS! 426807937862210000 */;
+
+--echo connection default;
+connection default;
+--echo sleep 0.1;
+sleep 0.1;
+xa commit 'tst' cts 426807937862210001;
+
+--echo connection con1
+connection con1;
+reap;
+xa end 'wht';
+xa rollback 'wht';
+
+--echo connection con2
+connection con2;
+reap;
+rollback;
+
+--echo connection con3
+connection con3;
+reap;
+rollback;
+
+# update, delete row
+# read rows modified by a transaction who is in running/commit state
+# iso-level: rc, rr
+
+--echo connection default;
+connection default;
+
+xa start 'tst';
+update history set h_c_w_id=90011 where hist_id=1;
+delete from history where hist_id=2;
+
+--echo connection con1;
+connection con1;
+set session transaction isolation level READ COMMITTED;
+SELECT @@session.transaction_isolation;
+
+begin;
+select * from history /*STS! 426807937862210010 */;
+
+--echo connection default;
+connection default;
+xa end 'tst';
+xa prepare 'tst';
+xa commit 'tst' cts 426807937862210012;
+
+--echo connection con2;
+connection con2;
+select * from history /*STS! 426807937862210011 */;
+
+--echo connection con3;
+connection con3;
+select * from history /*STS! 426807937862210013 */;
+
+--echo connection con1;
+connection con1;
+#rr
+select * from history;
+#rc
+select * from history /*STS! 426807937862210014 */;
+rollback;
+
+set session transaction isolation level REPEATABLE READ;
+SELECT @@session.transaction_isolation;
+
+# delete and insert a row with the same primary key.
+# insert and delete a row with the same primary key.
+
+--echo connection default;
+connection default;
+
+CREATE TABLE gmt (
+  t1 int,
+  t2 varchar(10),
+  primary key(t1)
+) ENGINE=InnoDB;
+
+insert into gmt values(1, 'a');
+
+--echo connection con1;
+connection con1;
+
+begin;
+select * from gmt /*STS! 426807937862210020 */;
+
+--echo connection default;
+connection default;
+
+xa start 'tst';
+delete from gmt where t1=1;
+insert into gmt values(1, 'b');
+insert into gmt values(2, 'c');
+delete from gmt where t1=2;
+xa end 'tst';
+xa prepare 'tst';
+xa commit 'tst' cts 426807937862210021;
+
+--echo connection con1;
+connection con1;
+
+select * from gmt;
+rollback;
+
+--echo connection con2;
+connection con2;
+
+select * from gmt /*STS! 426807937862210022 */;
+
+# complex update: primary key, second key, multiple update times in a transaction.
+
+--echo connection con1;
+connection con1;
+
+insert into gmt values(4, 'd');
+
+begin;
+select * from gmt /*STS! 426807937862210030 */;
+select * from history;
+
+--echo connection default;
+connection default;
+
+xa start 'tst';
+update gmt set t1=3 where t1=1;
+update history set h_c_w_id=90021 where h_c_w_id=90011;
+update gmt set t2='e' where t1=4;
+update gmt set t1=5 where t2='e';
+xa end 'tst';
+xa prepare 'tst';
+xa commit 'tst' cts 426807937862210031;
+
+--echo connection con1;
+connection con1;
+
+select * from gmt;
+select * from history;
+rollback;
+
+--echo connection con2;
+connection con2;
+
+select * from gmt /*STS! 426807937862210032 */;
+select * from history /*STS! 426807937862210032 */;
+
+# rollback
+
+--echo connection con1;
+connection con1;
+
+begin;
+select * from gmt /*STS! 426807937862210040 */;
+
+--echo connection default;
+connection default;
+
+xa start 'tst';
+insert into gmt values(1, 'a');
+xa end 'tst';
+xa prepare 'tst';
+
+--echo connection con1;
+connection con1;
+
+send select * from gmt;
+
+--echo connection default;
+connection default;
+--echo sleep 0.1
+sleep 0.1;
+xa rollback 'tst';
+
+--echo connection con1;
+connection con1;
+
+reap;
+select * from gmt;
+rollback;
+
+--echo connection con2;
+connection con2;
+
+select * from gmt /*STS! 426807937862210041 */;
+
+# write and read in one transaction
+
+--echo connection default;
+connection default;
+
+xa start 'tst';
+insert into gmt values(1, 'a');
+select * from gmt /*STS! 426807937862210050 */;
+xa end 'tst';
+xa prepare 'tst';
+xa rollback 'tst';
+
+# compatible for local transaction, one phase commit transaction, auto commit statement
+
+--echo connection con1;
+connection con1;
+
+begin;
+select * from gmt /*STS! 426807937862210060 */;
+
+--echo connection default;
+connection default;
+
+xa start 'tst';
+insert into gmt values(1, 'a');
+xa end 'tst';
+xa commit 'tst' one phase;
+
+update gmt set t2='c' where t1=3;
+
+begin;
+delete from gmt where t1=5;
+commit;
+
+--echo connection con1;
+connection con1;
+
+select * from gmt;
+rollback;
+
+--echo connection con2;
+connection con2;
+
+select * from gmt /*STS! 426807937862210061 */;
+
+# compatible for read without sts
+
+--echo connection default;
+connection default;
+
+xa start 'tst';
+insert into gmt values(5, 'e');
+
+--echo connection con1;
+connection con1;
+
+select * from gmt;
+
+--echo connection default;
+connection default;
+
+xa end 'tst';
+xa prepare 'tst';
+
+--echo connection con1;
+connection con1;
+
+select * from gmt;
+
+--echo connection default;
+connection default;
+xa commit 'tst' cts 426807937862210070;
+
+
+--echo connection con1;
+connection con1;
+
+select * from gmt;
+
+# count(*) using primary key/second key
+
+begin;
+select count(*) from history /*STS! 426807937862210080 */;
+select count(*) from history where h_c_w_id > 90000;
+
+--echo connection default;
+connection default;
+
+xa start 'xst';
+insert into history values(2, 90021);
+insert into history values(3, 90031);
+xa end 'xst';
+xa prepare 'xst';
+xa commit 'xst' cts 426807937862210082;
+
+--echo connection con2;
+connection con2;
+
+begin;
+select count(*) from history /*STS! 426807937862210081 */;
+select count(*) from history where h_c_w_id > 90000;
+rollback;
+
+--echo connection con1;
+connection con1;
+
+select count(*) from history;
+select count(*) from history where h_c_w_id > 90000;
+rollback;
+
+--echo connection con3;
+connection con3;
+
+begin;
+select count(*) from history /*STS! 426807937862210083 */;
+select count(*) from history where h_c_w_id > 90000;
+rollback;
+
+# share transaction
+
+--echo connection default;
+connection default;
+
+xa start 'tst' /*STS! 426807937862210090 */;
+insert into gmt values(6, 'f');
+
+--echo connection con1;
+connection con1;
+
+xa start 'tst1' /*STS! 426807937862210090 */;
+select * from gmt;
+xa end 'tst1';
+xa rollback 'tst1';
+
+
+--echo connection con2;
+connection con2;
+
+xa start 'tst2' /*STS! 426807937862210091 */;
+select * from gmt;
+xa end 'tst2';
+xa rollback 'tst2';
+
+--echo connection default;
+connection default;
+
+xa end 'tst';
+xa rollback 'tst';
+
+# prepared transaction after mysql restart
+
+--echo connection default;
+connection default;
+
+xa start 'tst';
+update gmt set t2='aa' where t1=1;
+xa end 'tst';
+xa prepare 'tst';
+
+--echo connection con1;
+connection con1;
+
+xa start 'tst2';
+insert into history values(4, 90041);
+xa end 'tst2';
+xa prepare 'tst2';
+
+connection con3;
+--source include/restart_mysqld.inc
+
+connect (con4,localhost,root,,);
+connect (con5,localhost,root,,);
+
+--disable_query_log
+call mtr.add_suppression("Found [0-9]* prepared XA transactions");
+--enable_query_log
+
+--echo connection con4;
+connection con4;
+
+begin;
+send select * from gmt /*STS! 426807937862210101 */;
+
+--echo connection con5;
+connection con5;
+
+sleep 0.1;
+xa commit 'tst' cts 426807937862210100;
+xa rollback 'tst2';
+
+--echo connection con4;
+connection con4;
+
+reap;
+select count(*) from history where h_c_w_id > 90000;
+rollback;
+
+select * from gmt /*STS! 426807937862210102 */;
+
+drop table history;
+drop table gmt;
+
+--echo # --------------------------------------------------------------------------------
+--echo # Tests for blocking read timeout, the default --innodb-blocking-read-wait-timeout
+--echo # is 5 seconds.
+--echo # --------------------------------------------------------------------------------
+
+let $restart_parameters = "restart: --innodb-blocking-read-wait-timeout=5000";
+source include/restart_mysqld.inc;
+
+connect (brt0,localhost,root,,);
+connect (brt1,localhost,root,,);
+
+--echo connection brt0;
+connection brt0;
+
+CREATE TABLE brt (
+  t1 int,
+  t2 varchar(10),
+  primary key(t1)
+) ENGINE=InnoDB;
+
+insert into brt values(1, 'a');
+xa start 'tst1'; 
+update brt set t2 = 'b' where t1 = 1;
+xa end 'tst1';
+xa prepare 'tst1';
+
+--echo connection brt1
+connection brt1;
+xa start 'tst2' /*STS! 426807937862210000 */;
+send select * from brt where t1 = 1 ;
+
+--echo connection brt0;
+connection brt0;
+sleep 5.1;
+xa commit 'tst1' cts 426807937862209999;
+
+--echo connection brt1
+connection brt1;
+--error ER_BLOCKING_READ_WAIT_TIMEOUT
+reap;
+xa end 'tst2';
+xa prepare 'tst2';
+xa commit 'tst2';
+
+# test for continue blocking read
+--echo connection brt0;
+connection brt0;
+xa start 'tst1'; 
+update brt set t2 = 'a' where t1 = 1;
+xa end 'tst1';
+xa prepare 'tst1';
+
+--echo connection brt1
+connection brt1;
+xa start 'tst2' /*STS! 426807937862210002 */;
+--error ER_BLOCKING_READ_WAIT_TIMEOUT
+select * from brt where t1 = 1 ;
+--error ER_BLOCKING_READ_WAIT_TIMEOUT
+select * from brt where t1 = 1 ;
+send select * from brt where t1 = 1 ;
+
+--echo connection brt0;
+connection brt0;
+sleep 5.1;
+xa commit 'tst1' cts 426807937862210001;
+
+--echo connection brt1
+connection brt1;
+--error ER_BLOCKING_READ_WAIT_TIMEOUT
+reap;
+xa end 'tst2';
+xa prepare 'tst2';
+xa commit 'tst2';
+
+# This test commits within 5 seconds, so it's ok.
+--echo connection brt0;
+connection brt0;
+xa start 'tst1'; 
+update brt set t2 = 'c' where t1 = 1;
+xa end 'tst1';
+xa prepare 'tst1';
+
+--echo connection brt1
+connection brt1;
+xa start 'tst2' /*STS! 426807937862210004 */;
+send select * from brt where t1 = 1 ;
+
+--echo connection brt0;
+connection brt0;
+xa commit 'tst1' cts 426807937862210003;
+
+--echo connection brt1
+connection brt1;
+reap;
+xa end 'tst2';
+xa prepare 'tst2';
+xa commit 'tst2';
+
+# Restart for testing the setting of --innodb-blocking-read-wait-timeout.
+let $restart_parameters = "restart: --innodb-blocking-read-wait-timeout=15000";
+source include/restart_mysqld.inc;
+
+connect (brt2,localhost,root,,);
+connect (brt3,localhost,root,,);
+
+--echo connection brt2;
+connection brt2;
+xa start 'tst1'; 
+update brt set t2 = 'd' where t1 = 1;
+xa end 'tst1';
+xa prepare 'tst1';
+
+--echo connection brt3
+connection brt3;
+xa start 'tst2' /*STS! 426807937862210006 */;
+send select * from brt where t1 = 1 ;
+
+--echo connection brt2;
+connection brt2;
+sleep 5.1;
+xa commit 'tst1' cts 426807937862210005;
+
+# The new --innodb-blocking-read-wait-timeout is 15 seconds, 
+# so commits within 15 seconds is ok;
+--echo connection brt3
+connection brt3;
+reap;
+xa end 'tst2';
+xa prepare 'tst2';
+xa commit 'tst2';
+
+
+# Sleeping more than 15 seconds will receive an error.
+--echo connection brt2;
+connection brt2;
+xa start 'tst1'; 
+update brt set t2 = 'e' where t1 = 1;
+xa end 'tst1';
+xa prepare 'tst1';
+
+--echo connection brt3
+connection brt3;
+xa start 'tst2' /*STS! 426807937862210008 */;
+send select * from brt where t1 = 1 ;
+
+--echo connection brt2;
+connection brt2;
+sleep 15.1;
+xa commit 'tst1' cts 426807937862210007;
+
+--echo connection brt3
+connection brt3;
+--error ER_BLOCKING_READ_WAIT_TIMEOUT
+reap;
+xa end 'tst2';
+xa prepare 'tst2';
+xa commit 'tst2';
+
+--echo # --------------------------------------------------------------------------------
+--echo # End of Tests for blocking read timeout.
+--echo # --------------------------------------------------------------------------------
+
+drop table brt;
+
+--echo # --------------------------------------------------------------------------------
+--echo # Tests for sts time window.
+--echo # --------------------------------------------------------------------------------
+
+# Restart for testing the setting of --innodb-purge-time-window=10.
+let $restart_parameters = "restart: --innodb-purge-time-window=10";
+source include/restart_mysqld.inc;
+
+connect (sts0,localhost,root,,);
+connect (sts1,localhost,root,,);
+
+--echo connection sts0;
+connection sts0;
+
+CREATE TABLE sts (
+  t1 int,
+  t2 varchar(10),
+  primary key(t1)
+) ENGINE=InnoDB;
+
+
+insert into sts values(1, 'a');
+xa start 'tst1'; 
+update sts set t2 = 'b' where t1 = 1;
+xa end 'tst1';
+xa prepare 'tst1';
+# the sts time window is 2621702144,
+# so sts before 426807930000000000(included) has been purged.
+xa commit 'tst1' cts 426807932621702144;
+
+--echo connection sts1;
+connection sts1;
+# sleep for one second, because purge system will start every second,
+# global oldest sts wil be set during this period;
+--sleep 1
+--error ER_STS_TOO_SMALL
+select * from sts /*STS! 426807930000000000 */;
+
+select * from sts /*STS! 426807930000000001 */;
+
+--echo # --------------------------------------------------------------------------------
+--echo # End of Tests for sts time window.
+--echo # --------------------------------------------------------------------------------
+
+--echo # --------------------------------------------------------------------------------
+--echo # Tests for --innodb_enable_tso.
+--echo # --------------------------------------------------------------------------------
+#--let $show=`show engine innodb status`;
+# Restart for testing the setting of --innodb_enable_tso.
+let $restart_parameters = "restart: --innodb_enable_tso=false";
+source include/restart_mysqld.inc;
+
+connect (tso0,localhost,root,,);
+--error ER_TSO_IS_CLOSED
+select * from sts /*STS! 426807930000000001 */;
+
+# Restart for testing the setting of --innodb_enable_tso.
+let $restart_parameters = "restart: --innodb_enable_tso";
+source include/restart_mysqld.inc;
+
+connect (tso1,localhost,root,,);
+select * from sts /*STS! 426807930000000001 */;
+
+#output 
+--echo # --------------------------------------------------------------------------------
+--echo # End of Tests for --innodb_enable_tso.
+--echo # --------------------------------------------------------------------------------
+
+drop table sts;

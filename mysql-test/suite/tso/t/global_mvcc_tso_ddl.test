@@ -1,0 +1,80 @@
+#
+# Test that DDL statements work correctly under global mvcc feature based on tso
+#
+
+--echo connection default;
+connection default;
+
+# prepare data
+
+create table t2 (col1 varchar(2), col2 varchar(2), primary key (col1));
+
+xa start '101', '100', 40;
+insert into t2 values ('aa','bb');
+xa end '101', '100', 40;
+xa prepare '101', '100', 40;
+xa commit '101', '100', 40 CTS 50101;
+
+xa start '102', '100', 40;
+insert into t2 values ('bb','aa');
+xa end '102', '100', 40;
+xa prepare '102', '100', 40;
+xa commit '102', '100', 40 CTS 50102;
+
+select * from t2 /*STS! 50100 */;
+select * from t2 /*STS! 50101 */;
+select * from t2 /*STS! 50102 */;
+
+# test add / drop column (table already has primary key)
+
+alter table t2 add column col3 varchar(2);
+select * from t2 /*STS! 50100 */;
+select * from t2 /*STS! 50101 */;
+select * from t2 /*STS! 50102 */;
+
+alter table t2 drop column col3;
+select * from t2 /*STS! 50100 */;
+select * from t2 /*STS! 50101 */;
+select * from t2 /*STS! 50102 */;
+
+# test drop primary key
+# drop primary key isn't online (algorithm is copy), so CTS will become max_cts+1
+
+alter table t2 drop primary key;
+
+select * from t2 /*STS! 50102 */;
+select * from t2 /*STS! 50103 */;
+
+# test add / drop column (table doesn't have primary key)
+
+delete from t2;
+
+xa start '101', '100', 40;
+insert into t2 values ('aa','bb');
+xa end '101', '100', 40;
+xa prepare '101', '100', 40;
+xa commit '101', '100', 40 CTS 50201;
+xa start '102', '100', 40;
+insert into t2 values ('bb','aa');
+xa end '102', '100', 40;
+xa prepare '102', '100', 40;
+xa commit '102', '100', 40 CTS 50202;
+
+alter table t2 add column col3 varchar(2);
+select * from t2 /*STS! 50200 */;
+select * from t2 /*STS! 50201 */;
+select * from t2 /*STS! 50202 */;
+
+alter table t2 drop column col3;
+select * from t2 /*STS! 50200 */;
+select * from t2 /*STS! 50201 */;
+select * from t2 /*STS! 50202 */;
+
+# test add primary key
+
+alter table t2 add primary key (col1);
+select * from t2 /*STS! 50200 */;
+select * from t2 /*STS! 50201 */;
+select * from t2 /*STS! 50202 */;
+
+drop table t2;

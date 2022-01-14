@@ -1,0 +1,1364 @@
+#
+# Test of select 
+#
+# Set --innodb-blocking-read-wait-timeout=1000
+# restart: --innodb-blocking-read-wait-timeout=1000
+drop table if exists customers, orderitems, orders, vendors;
+# Connection default
+#
+# Create customers table
+#
+create table customers
+(
+cust_id int NOT NULL AUTO_INCREMENT,
+cust_name char(50) NOT NULL ,
+cust_address char(50) NULL ,
+PRIMARY KEY (cust_id)
+) ENGINE=InnoDB CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+#
+# Create orderitems table
+#
+create table orderitems
+(
+order_num  int          NOT NULL ,
+order_item int          NOT NULL ,
+prod_id    char(10)     NOT NULL ,
+quantity   int          NOT NULL ,
+item_price decimal(8,2) NOT NULL ,
+PRIMARY KEY (order_num, order_item)
+) ENGINE=InnoDB CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+#
+# Create orders table
+#
+create table orders
+(
+order_num  int      NOT NULL AUTO_INCREMENT,
+order_date datetime NOT NULL ,
+cust_id    int      NOT NULL ,
+PRIMARY KEY (order_num)
+) ENGINE=InnoDB CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+#
+# Create products table
+#
+create table products
+(
+prod_id    char(10)      NOT NULL,
+vend_id    int           NOT NULL ,
+prod_name  char(255)     NOT NULL ,
+prod_price decimal(8,2)  NOT NULL ,
+prod_desc  text          NULL ,
+PRIMARY KEY(prod_id)
+) ENGINE=InnoDB CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+#
+# Create vendors table
+#
+create table vendors
+(
+vend_id      int      NOT NULL AUTO_INCREMENT,
+vend_name    char(50) NOT NULL ,
+vend_address char(50) NULL ,
+PRIMARY KEY (vend_id)
+) ENGINE=InnoDB CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+#
+# Define foreign keys
+#
+alter table orderitems add CONSTRAINT fk_orderitems_orders FOREIGN KEY (order_num) REFERENCES orders (order_num);
+alter table orderitems add CONSTRAINT fk_orderitems_products FOREIGN KEY (prod_id) REFERENCES products (prod_id);
+alter table orders add CONSTRAINT fk_orders_customers FOREIGN KEY (cust_id) REFERENCES customers (cust_id);
+alter table products add CONSTRAINT fk_products_vendors FOREIGN KEY (vend_id) REFERENCES vendors (vend_id);
+#
+# Populate customers table
+#
+insert into customers(cust_id, cust_name, cust_address)
+values(10001, 'Coyote Inc.', '200 Maple Lane');
+insert into customers(cust_id, cust_name, cust_address)
+values(10002, 'Mouse House', '333 Fromage Lane');
+insert into customers(cust_id, cust_name, cust_address)
+values(10003, 'Wascals', '1 Sunny Place');
+insert into customers(cust_id, cust_name, cust_address)
+values(10004, 'Yosemite Place', '829 Riverside Drive');
+insert into customers(cust_id, cust_name, cust_address)
+values(10005, 'E Fudd', '4545 53rd Street');
+#
+# Populate vendors table
+#
+insert into vendors(vend_id, vend_name, vend_address)
+values(1001,'Anvils R Us','123 Main Street');
+insert into vendors(vend_id, vend_name, vend_address)
+values(1002,'LT Supplies','500 Park Street');
+insert into vendors(vend_id, vend_name, vend_address)
+values(1003,'ACME','555 High Street');
+insert into vendors(vend_id, vend_name, vend_address)
+values(1004,'Furball Inc.','1000 5th Avenue');
+insert into vendors(vend_id, vend_name, vend_address)
+values(1005,'Jet Set','42 Galaxy Road');
+insert into vendors(vend_id, vend_name, vend_address)
+values(1006,'Jouets Et Ours','1 Rue Amusement');
+#
+# Populate products table
+#
+insert into products(prod_id, vend_id, prod_name, prod_price, prod_desc)
+values('ANV01', 1001, '.5 ton anvil', 5.99, '.5 ton anvil, black, complete with handy hook');
+insert into products(prod_id, vend_id, prod_name, prod_price, prod_desc)
+values('ANV02', 1001, '1 ton anvil', 9.99, '1 ton anvil, black, complete with handy hook and carrying case');
+insert into products(prod_id, vend_id, prod_name, prod_price, prod_desc)
+values('ANV03', 1001, '2 ton anvil', 14.99, '2 ton anvil, black, complete with handy hook and carrying case');
+insert into products(prod_id, vend_id, prod_name, prod_price, prod_desc)
+values('OL1', 1002, 'Oil can', 8.99, 'Oil can, red');
+insert into products(prod_id, vend_id, prod_name, prod_price, prod_desc)
+values('FU1', 1002, 'Fuses', 3.42, '1 dozen, extra long');
+insert into products(prod_id, vend_id, prod_name, prod_price, prod_desc)
+values('SLING', 1003, 'Sling', 4.49, 'Sling, one size fits all');
+insert into products(prod_id, vend_id, prod_name, prod_price, prod_desc)
+values('TNT1', 1003, 'TNT (1 stick)', 2.50, 'TNT, red, single stick');
+insert into products(prod_id, vend_id, prod_name, prod_price, prod_desc)
+values('TNT2', 1003, 'TNT (5 sticks)', 10, 'TNT, red, pack of 10 sticks');
+insert into products(prod_id, vend_id, prod_name, prod_price, prod_desc)
+values('FB', 1003, 'Bird seed', 10, 'Large bag (suitable for road runners)');
+insert into products(prod_id, vend_id, prod_name, prod_price, prod_desc)
+values('FC', 1003, 'Carrots', 2.50, 'Carrots (rabbit hunting season only)');
+insert into products(prod_id, vend_id, prod_name, prod_price, prod_desc)
+values('SAFE', 1003, 'Safe', 50, 'Safe with combination lock');
+insert into products(prod_id, vend_id, prod_name, prod_price, prod_desc)
+values('DTNTR', 1003, 'Detonator', 13, 'Detonator (plunger powered), fuses not included');
+insert into products(prod_id, vend_id, prod_name, prod_price, prod_desc)
+values('JP1000', 1005, 'JetPack 1000', 35, 'JetPack 1000, intended for single use');
+insert into products(prod_id, vend_id, prod_name, prod_price, prod_desc)
+values('JP2000', 1005, 'JetPack 2000', 55, 'JetPack 2000, multi-use');
+#
+# Populate orders table
+#
+insert into orders(order_num, order_date, cust_id)
+values(20005, '2005-09-01', 10001);
+insert into orders(order_num, order_date, cust_id)
+values(20006, '2005-09-12', 10003);
+insert into orders(order_num, order_date, cust_id)
+values(20007, '2005-09-30', 10004);
+insert into orders(order_num, order_date, cust_id)
+values(20008, '2005-10-03', 10005);
+insert into orders(order_num, order_date, cust_id)
+values(20009, '2005-10-08', 10001);
+#
+# Populate orderitems table
+#
+insert into orderitems(order_num, order_item, prod_id, quantity, item_price)
+values(20005, 1, 'ANV01', 10, 5.99);
+insert into orderitems(order_num, order_item, prod_id, quantity, item_price)
+values(20005, 2, 'ANV02', 3, 9.99);
+insert into orderitems(order_num, order_item, prod_id, quantity, item_price)
+values(20005, 3, 'TNT2', 5, 10);
+insert into orderitems(order_num, order_item, prod_id, quantity, item_price)
+values(20005, 4, 'FB', 1, 10);
+insert into orderitems(order_num, order_item, prod_id, quantity, item_price)
+values(20006, 1, 'JP2000', 1, 55);
+insert into orderitems(order_num, order_item, prod_id, quantity, item_price)
+values(20007, 1, 'TNT2', 100, 10);
+insert into orderitems(order_num, order_item, prod_id, quantity, item_price)
+values(20008, 1, 'FC', 50, 2.50);
+insert into orderitems(order_num, order_item, prod_id, quantity, item_price)
+values(20009, 1, 'FB', 1, 10);
+insert into orderitems(order_num, order_item, prod_id, quantity, item_price)
+values(20009, 2, 'OL1', 1, 8.99);
+insert into orderitems(order_num, order_item, prod_id, quantity, item_price)
+values(20009, 3, 'SLING', 1, 4.49);
+insert into orderitems(order_num, order_item, prod_id, quantity, item_price)
+values(20009, 4, 'ANV03', 1, 14.99);
+xa start 'tst';
+update customers set cust_name = "a" where cust_id = 10001;
+xa end 'tst';
+xa prepare 'tst';
+#
+# Normal select
+#
+# Connection con1
+xa start 'tst1' /*STS! 426807937862210002 */;
+select * from customers;
+ERROR HY000: Blocking read wait timeout
+select * from customers;
+# Connection con2
+begin;
+select * from customers;
+# Connection con3
+begin;
+select * from customers /*STS! 426807937862210000 */;
+# Connection default
+xa commit 'tst' cts 426807937862210001;
+# Connection con1
+cust_id	cust_name	cust_address
+10001	a	200 Maple Lane
+10002	Mouse House	333 Fromage Lane
+10003	Wascals	1 Sunny Place
+10004	Yosemite Place	829 Riverside Drive
+10005	E Fudd	4545 53rd Street
+xa end 'tst1';
+xa rollback 'tst1';
+# Connection con2
+cust_id	cust_name	cust_address
+10001	Coyote Inc.	200 Maple Lane
+10002	Mouse House	333 Fromage Lane
+10003	Wascals	1 Sunny Place
+10004	Yosemite Place	829 Riverside Drive
+10005	E Fudd	4545 53rd Street
+rollback;
+# Connection con3
+cust_id	cust_name	cust_address
+10001	Coyote Inc.	200 Maple Lane
+10002	Mouse House	333 Fromage Lane
+10003	Wascals	1 Sunny Place
+10004	Yosemite Place	829 Riverside Drive
+10005	E Fudd	4545 53rd Street
+rollback;
+#
+# Update without change, then select
+#
+# Connection default
+xa start 'tst';
+update customers set cust_name = "b" where cust_id = 10001;
+xa end 'tst';
+xa prepare 'tst';
+# Connection con1
+xa start 'tst1' /*STS! 426807937862210005 */;
+select * from customers;
+ERROR HY000: Blocking read wait timeout
+select * from customers;
+# Connection con2
+begin;
+select * from customers;
+# Connection con3
+begin;
+select * from customers /*STS! 426807937862210003 */;
+# Connection default
+xa commit 'tst' cts 426807937862210004;
+# Connection con1
+cust_id	cust_name	cust_address
+10001	b	200 Maple Lane
+10002	Mouse House	333 Fromage Lane
+10003	Wascals	1 Sunny Place
+10004	Yosemite Place	829 Riverside Drive
+10005	E Fudd	4545 53rd Street
+xa end 'tst1';
+xa rollback 'tst1';
+# Connection con2
+cust_id	cust_name	cust_address
+10001	a	200 Maple Lane
+10002	Mouse House	333 Fromage Lane
+10003	Wascals	1 Sunny Place
+10004	Yosemite Place	829 Riverside Drive
+10005	E Fudd	4545 53rd Street
+rollback;
+# Connection con3
+cust_id	cust_name	cust_address
+10001	a	200 Maple Lane
+10002	Mouse House	333 Fromage Lane
+10003	Wascals	1 Sunny Place
+10004	Yosemite Place	829 Riverside Drive
+10005	E Fudd	4545 53rd Street
+rollback;
+#
+# Select ... inner join ... on ...
+#
+# Connection default
+xa start 'tst';
+insert into products(prod_id, vend_id, prod_name, prod_price, prod_desc)
+VALUES('TNT3', 1003, 'TNT (1 stick)', 2.50, 'TNT, red, single stick');
+xa end 'tst';
+xa prepare 'tst';
+# Connection con1
+xa start 'tst1' /*STS! 426807937862210008 */;
+select vend_name, prod_name, prod_price from vendors inner join products on vendors.vend_id=products.vend_id;
+ERROR HY000: Blocking read wait timeout
+select vend_name, prod_name, prod_price from vendors inner join products on vendors.vend_id=products.vend_id;
+# Connection con2
+begin;
+select vend_name, prod_name, prod_price from vendors inner join products on vendors.vend_id=products.vend_id;
+# Connection con3
+begin;
+select vend_name, prod_name, prod_price from vendors inner join products on vendors.vend_id=products.vend_id /*STS! 426807937862210006 */;
+# Connection default
+xa commit 'tst' cts 426807937862210007;
+# Connection con1
+vend_name	prod_name	prod_price
+Anvils R Us	.5 ton anvil	5.99
+Anvils R Us	1 ton anvil	9.99
+Anvils R Us	2 ton anvil	14.99
+LT Supplies	Fuses	3.42
+LT Supplies	Oil can	8.99
+ACME	Detonator	13.00
+ACME	Bird seed	10.00
+ACME	Carrots	2.50
+ACME	Safe	50.00
+ACME	Sling	4.49
+ACME	TNT (1 stick)	2.50
+ACME	TNT (5 sticks)	10.00
+ACME	TNT (1 stick)	2.50
+Jet Set	JetPack 1000	35.00
+Jet Set	JetPack 2000	55.00
+xa end 'tst1';
+xa rollback 'tst1';
+# Connection con2
+vend_name	prod_name	prod_price
+Anvils R Us	.5 ton anvil	5.99
+Anvils R Us	1 ton anvil	9.99
+Anvils R Us	2 ton anvil	14.99
+LT Supplies	Fuses	3.42
+LT Supplies	Oil can	8.99
+ACME	Detonator	13.00
+ACME	Bird seed	10.00
+ACME	Carrots	2.50
+ACME	Safe	50.00
+ACME	Sling	4.49
+ACME	TNT (1 stick)	2.50
+ACME	TNT (5 sticks)	10.00
+Jet Set	JetPack 1000	35.00
+Jet Set	JetPack 2000	55.00
+rollback;
+# Connection con3
+vend_name	prod_name	prod_price
+Anvils R Us	.5 ton anvil	5.99
+Anvils R Us	1 ton anvil	9.99
+Anvils R Us	2 ton anvil	14.99
+LT Supplies	Fuses	3.42
+LT Supplies	Oil can	8.99
+ACME	Detonator	13.00
+ACME	Bird seed	10.00
+ACME	Carrots	2.50
+ACME	Safe	50.00
+ACME	Sling	4.49
+ACME	TNT (1 stick)	2.50
+ACME	TNT (5 sticks)	10.00
+Jet Set	JetPack 1000	35.00
+Jet Set	JetPack 2000	55.00
+rollback;
+#
+# Select ... left outer join  ... on ...
+#
+# Connection default
+xa start 'tst';
+update customers set cust_address="China" where cust_id="10001";
+xa end 'tst';
+xa prepare 'tst';
+# Connection con1
+xa start 'tst1' /*STS! 426807937862210011 */;
+select customers.cust_id, orders.order_num from customers left outer join orders on customers.cust_id=orders.cust_id;
+ERROR HY000: Blocking read wait timeout
+select customers.cust_id, orders.order_num from customers left outer join orders on customers.cust_id=orders.cust_id;
+# Connection con2
+begin;
+select customers.cust_id, orders.order_num from customers left outer join orders on customers.cust_id=orders.cust_id;
+# Connection con3
+begin;
+select customers.cust_id, orders.order_num from customers left outer join orders on customers.cust_id=orders.cust_id /*STS! 426807937862210009 */;
+# Connection default
+xa commit 'tst' cts 426807937862210010;
+# Connection con1
+cust_id	order_num
+10001	20005
+10001	20009
+10002	NULL
+10003	20006
+10004	20007
+10005	20008
+xa end 'tst1';
+xa rollback 'tst1';
+# Connection con2
+cust_id	order_num
+10001	20005
+10001	20009
+10002	NULL
+10003	20006
+10004	20007
+10005	20008
+rollback;
+# Connection con3
+cust_id	order_num
+10001	20005
+10001	20009
+10002	NULL
+10003	20006
+10004	20007
+10005	20008
+rollback;
+#
+# Self join
+#
+# Connection default
+xa start 'tst';
+update products set prod_desc = "TNT, black, single stick" where prod_id = "TNT3";
+xa end 'tst';
+xa prepare 'tst';
+# Connection con1
+xa start 'tst1' /*STS! 426807937862210014 */;
+select p1.prod_id, p1.prod_name from products as p1, products as p2 where p1.vend_id = p2. vend_id and p2.prod_id = 'DTNTR';
+ERROR HY000: Blocking read wait timeout
+select p1.prod_id, p1.prod_name from products as p1, products as p2 where p1.vend_id = p2. vend_id and p2.prod_id = 'DTNTR';
+# Connection con2
+begin;
+select p1.prod_id, p1.prod_name from products as p1, products as p2 where p1.vend_id = p2. vend_id and p2.prod_id = 'DTNTR';
+# Connection con3
+begin;
+select p1.prod_id, p1.prod_name from products as p1, products as p2 where p1.vend_id = p2. vend_id and p2.prod_id = 'DTNTR' /*STS! 426807937862210012 */;
+# Connection default
+xa commit 'tst' cts 426807937862210013;
+# Connection con1
+prod_id	prod_name
+DTNTR	Detonator
+FB	Bird seed
+FC	Carrots
+SAFE	Safe
+SLING	Sling
+TNT1	TNT (1 stick)
+TNT2	TNT (5 sticks)
+TNT3	TNT (1 stick)
+xa end 'tst1';
+xa rollback 'tst1';
+# Connection con2
+prod_id	prod_name
+DTNTR	Detonator
+FB	Bird seed
+FC	Carrots
+SAFE	Safe
+SLING	Sling
+TNT1	TNT (1 stick)
+TNT2	TNT (5 sticks)
+TNT3	TNT (1 stick)
+rollback;
+# Connection con3
+prod_id	prod_name
+DTNTR	Detonator
+FB	Bird seed
+FC	Carrots
+SAFE	Safe
+SLING	Sling
+TNT1	TNT (1 stick)
+TNT2	TNT (5 sticks)
+TNT3	TNT (1 stick)
+rollback;
+#
+# Select join with aggregate function
+# Select ... inner join ... on ... group by ...
+# Connection default
+xa start 'tst';
+update customers set cust_name = 'c' where cust_id = 10001;
+xa end 'tst';
+xa prepare 'tst';
+# Connection con1
+xa start 'tst1' /*STS! 426807937862210017 */;
+select customers.cust_name, customers.cust_id, count(orders.order_num) as num_ord from customers inner join orders on customers.cust_id =  orders.cust_id group by customers.cust_id;
+ERROR HY000: Blocking read wait timeout
+select customers.cust_name, customers.cust_id, count(orders.order_num) as num_ord from customers inner join orders on customers.cust_id =  orders.cust_id group by customers.cust_id;
+# Connection con2
+begin;
+select customers.cust_name, customers.cust_id, count(orders.order_num) as num_ord from customers inner join orders on customers.cust_id =  orders.cust_id group by customers.cust_id;
+# Connection con3
+begin;
+select customers.cust_name, customers.cust_id, count(orders.order_num) as num_ord from customers inner join orders on customers.cust_id =  orders.cust_id group by customers.cust_id /*STS! 426807937862210015 */;
+# Connection default
+xa commit 'tst' cts 426807937862210016;
+# Connection con1
+cust_name	cust_id	num_ord
+c	10001	2
+Wascals	10003	1
+Yosemite Place	10004	1
+E Fudd	10005	1
+xa end 'tst1';
+xa rollback 'tst1';
+# Connection con2
+cust_name	cust_id	num_ord
+b	10001	2
+Wascals	10003	1
+Yosemite Place	10004	1
+E Fudd	10005	1
+rollback;
+# Connection con3
+cust_name	cust_id	num_ord
+b	10001	2
+Wascals	10003	1
+Yosemite Place	10004	1
+E Fudd	10005	1
+rollback;
+#
+# Select ... limit ...
+#
+# Connection default
+xa start 'tst';
+update customers set cust_name = 'd' where cust_id = 10001;
+xa end 'tst';
+xa prepare 'tst';
+# Connection con1
+xa start 'tst1' /*STS! 426807937862210020 */;
+select cust_name from customers limit 3;
+ERROR HY000: Blocking read wait timeout
+select cust_name from customers limit 3;
+# Connection con2
+begin;
+select cust_name from customers limit 3;
+# Connection con3
+begin;
+select cust_name from customers limit 3 /*STS! 426807937862210018 */;
+# Connection default
+xa commit 'tst' cts 426807937862210019;
+# Connection con1
+cust_name
+d
+Mouse House
+Wascals
+xa end 'tst1';
+xa rollback 'tst1';
+# Connection con2
+cust_name
+c
+Mouse House
+Wascals
+rollback;
+# Connection con3
+cust_name
+c
+Mouse House
+Wascals
+rollback;
+#
+# Select ... where ... like ...
+#
+# Connection default
+xa start 'tst';
+update customers set cust_name = 'e' where cust_id = 10001;
+xa end 'tst';
+xa prepare 'tst';
+# Connection con1
+xa start 'tst1' /*STS! 426807937862210023 */;
+select cust_name from customers where cust_address like '%Sunny _lace%';
+ERROR HY000: Blocking read wait timeout
+select cust_name from customers where cust_address like '%Sunny _lace%';
+# Connection con2
+begin;
+select cust_name from customers where cust_address like '%Sunny _lace%';
+# Connection con3
+begin;
+select cust_name from customers where cust_address like '%Sunny _lace%' /*STS! 426807937862210021 */;
+# Connection default
+xa commit 'tst' cts 426807937862210022;
+# Connection con1
+cust_name
+Wascals
+xa end 'tst1';
+xa rollback 'tst1';
+# Connection con2
+cust_name
+Wascals
+rollback;
+# Connection con3
+cust_name
+Wascals
+rollback;
+#
+# Distinct function
+#
+# Connection default
+xa start 'tst';
+update products set prod_desc = '0.5 ton anvil, black, complete with handy hook' where prod_id = 'ANV01';
+xa end 'tst';
+xa prepare 'tst';
+# Connection con1
+xa start 'tst1' /*STS! 426807937862210026 */;
+select avg(distinct prod_price) as avg_price from products where vend_id = 1001;
+ERROR HY000: Blocking read wait timeout
+select avg(distinct prod_price) as avg_price from products where vend_id = 1001;
+# Connection con2
+begin;
+select avg(distinct prod_price) as avg_price from products where vend_id = 1001;
+# Connection con3
+begin;
+select avg(distinct prod_price) as avg_price from products where vend_id = 1001 /*STS! 426807937862210024 */;
+# Connection default
+xa commit 'tst' cts 426807937862210025;
+# Connection con1
+avg_price
+10.323333
+xa end 'tst1';
+xa rollback 'tst1';
+# Connection con2
+avg_price
+10.323333
+rollback;
+# Connection con3
+avg_price
+10.323333
+rollback;
+#
+# Select ... where ... between ...
+#
+# Connection default
+xa start 'tst';
+update products set prod_desc = '0.5 ton anvil, red, complete with handy hook' where prod_id = 'ANV01';
+xa end 'tst';
+xa prepare 'tst';
+# Connection con1
+xa start 'tst1' /*STS! 426807937862210029 */;
+select prod_name, prod_price from products where prod_price between 5 and 10;
+ERROR HY000: Blocking read wait timeout
+select prod_name, prod_price from products where prod_price between 5 and 10;
+# Connection con2
+begin;
+select prod_name, prod_price from products where prod_price between 5 and 10;
+# Connection con3
+begin;
+select prod_name, prod_price from products where prod_price between 5 and 10 /*STS! 426807937862210027 */;
+# Connection default
+xa commit 'tst' cts 426807937862210028;
+# Connection con1
+prod_name	prod_price
+.5 ton anvil	5.99
+1 ton anvil	9.99
+Bird seed	10.00
+Oil can	8.99
+TNT (5 sticks)	10.00
+xa end 'tst1';
+xa rollback 'tst1';
+# Connection con2
+prod_name	prod_price
+.5 ton anvil	5.99
+1 ton anvil	9.99
+Bird seed	10.00
+Oil can	8.99
+TNT (5 sticks)	10.00
+rollback;
+# Connection con3
+prod_name	prod_price
+.5 ton anvil	5.99
+1 ton anvil	9.99
+Bird seed	10.00
+Oil can	8.99
+TNT (5 sticks)	10.00
+rollback;
+#
+# select ... group by ... having ...
+#
+# Connection default
+xa start 'tst';
+update orders set order_date = '2005-09-02' where cust_id = 10001;
+xa end 'tst';
+xa prepare 'tst';
+# Connection con1
+xa start 'tst1' /*STS! 426807937862210032 */;
+select cust_id, count(*) as orders from orders group by cust_id having count(*) >= 2;
+ERROR HY000: Blocking read wait timeout
+select cust_id, count(*) as orders from orders group by cust_id having count(*) >= 2;
+# Connection con2
+begin;
+select cust_id, count(*) as orders from orders group by cust_id having count(*) >= 2;
+# Connection con3
+begin;
+select cust_id, count(*) as orders from orders group by cust_id having count(*) >= 2 /*STS! 426807937862210030 */;
+# Connection default
+xa commit 'tst' cts 426807937862210031;
+# Connection con1
+cust_id	orders
+10001	2
+xa end 'tst1';
+xa rollback 'tst1';
+# Connection con2
+cust_id	orders
+10001	2
+rollback;
+# Connection con3
+cust_id	orders
+10001	2
+rollback;
+#
+# Select if(...) ... 
+#
+# Connection default
+xa start 'tst';
+update products set prod_desc = '0.5 ton anvil, green, complete with handy hook' where prod_id = 'ANV01';
+xa end 'tst';
+xa prepare 'tst';
+# Connection con1
+xa start 'tst1' /*STS! 426807937862210035 */;
+select prod_name, if(prod_price > 30, 'high price', 'low proce') as price from products limit 5;
+ERROR HY000: Blocking read wait timeout
+select prod_name, if(prod_price > 30, 'high price', 'low proce') as price from products limit 5;
+# Connection con2
+begin;
+select prod_name, if(prod_price > 30, 'high price', 'low proce') as price from products limit 5;
+# Connection con3
+begin;
+select prod_name, if(prod_price > 30, 'high price', 'low proce') as price from products limit 5 /*STS! 426807937862210033 */;
+# Connection default
+xa commit 'tst' cts 426807937862210034;
+# Connection con1
+prod_name	price
+.5 ton anvil	low proce
+1 ton anvil	low proce
+2 ton anvil	low proce
+Detonator	low proce
+Bird seed	low proce
+xa end 'tst1';
+xa rollback 'tst1';
+# Connection con2
+prod_name	price
+.5 ton anvil	low proce
+1 ton anvil	low proce
+2 ton anvil	low proce
+Detonator	low proce
+Bird seed	low proce
+rollback;
+# Connection con3
+prod_name	price
+.5 ton anvil	low proce
+1 ton anvil	low proce
+2 ton anvil	low proce
+Detonator	low proce
+Bird seed	low proce
+rollback;
+#
+# Select ... union Select ...
+#
+# Connection default
+xa start 'tst';
+update products set prod_desc = '0.5 ton anvil, pink, complete with handy hook' where prod_id = 'ANV01';
+xa end 'tst';
+xa prepare 'tst';
+# Connection con1
+xa start 'tst1' /*STS! 426807937862210038 */;
+select vend_id, prod_id, prod_price from products where prod_price <= 6
+union 
+select vend_id, prod_id, prod_price from products where vend_id in (1001, 1002);
+ERROR HY000: Blocking read wait timeout
+select vend_id, prod_id, prod_price from products where prod_price <= 6
+union 
+select vend_id, prod_id, prod_price from products where vend_id in (1001, 1002);
+# Connection con2
+begin;
+select vend_id, prod_id, prod_price from products where prod_price <= 6
+union 
+select vend_id, prod_id, prod_price from products where vend_id in (1001, 1002);
+# Connection con3
+begin;
+select vend_id, prod_id, prod_price from products where prod_price <= 6
+union 
+select vend_id, prod_id, prod_price from products where vend_id in (1001, 1002) /*STS! 426807937862210036 */;
+# Connection default
+xa commit 'tst' cts 426807937862210037;
+# Connection con1
+vend_id	prod_id	prod_price
+1001	ANV01	5.99
+1003	FC	2.50
+1002	FU1	3.42
+1003	SLING	4.49
+1003	TNT1	2.50
+1003	TNT3	2.50
+1001	ANV02	9.99
+1001	ANV03	14.99
+1002	OL1	8.99
+xa end 'tst1';
+xa rollback 'tst1';
+# Connection con2
+vend_id	prod_id	prod_price
+1001	ANV01	5.99
+1003	FC	2.50
+1002	FU1	3.42
+1003	SLING	4.49
+1003	TNT1	2.50
+1003	TNT3	2.50
+1001	ANV02	9.99
+1001	ANV03	14.99
+1002	OL1	8.99
+rollback;
+# Connection con3
+vend_id	prod_id	prod_price
+1001	ANV01	5.99
+1003	FC	2.50
+1002	FU1	3.42
+1003	SLING	4.49
+1003	TNT1	2.50
+1003	TNT3	2.50
+1001	ANV02	9.99
+1001	ANV03	14.99
+1002	OL1	8.99
+rollback;
+#
+# Select ... where ... is NULL
+#
+# Connection default
+xa start 'tst';
+update customers set cust_address = NULL where cust_id = 10002;
+xa end 'tst';
+xa prepare 'tst';
+# Connection con1
+xa start 'tst1' /*STS! 426807937862210041 */;
+select cust_id from customers where cust_address is NULL;
+ERROR HY000: Blocking read wait timeout
+select cust_id from customers where cust_address is NULL;
+# Connection con2
+begin;
+select cust_id from customers where cust_address is NULL;
+# Connection con3
+begin;
+select cust_id from customers where cust_address is NULL /*STS! 426807937862210039 */;
+# Connection default
+xa commit 'tst' cts 426807937862210040;
+# Connection con1
+cust_id
+10002
+xa end 'tst1';
+xa rollback 'tst1';
+# Connection con2
+cust_id
+rollback;
+# Connection con3
+cust_id
+rollback;
+#
+# When inserting data, missing auto-increament column, then select
+#
+# Connection default
+xa start 'tst';
+insert into customers(cust_name, cust_address)
+VALUES('Coyote Inc.', '200 Maple Lane');
+xa end 'tst';
+xa prepare 'tst';
+# Connection con1
+xa start 'tst1' /*STS! 426807937862210044 */;
+select cust_id from customers where cust_id = 10006;
+ERROR HY000: Blocking read wait timeout
+select cust_id from customers where cust_id = 10006;
+# Connection con2
+begin;
+select cust_id from customers where cust_id = 10006;
+# Connection con3
+begin;
+select cust_id from customers where cust_id = 10006 /*STS! 426807937862210042 */;
+# Connection default
+xa commit 'tst' cts 426807937862210043;
+# Connection con1
+cust_id
+10006
+xa end 'tst1';
+xa rollback 'tst1';
+# Connection con2
+cust_id
+rollback;
+# Connection con3
+cust_id
+rollback;
+#
+# Sub query, select ... where ... in (Select ...)
+#
+# Connection default
+xa start 'tst';
+update orders set order_date = '2005-09-05' where cust_id = 10001;
+xa end 'tst';
+xa prepare 'tst';
+# Connection con1
+xa start 'tst1' /*STS! 426807937862210047 */;
+select cust_id from orders where order_num in (select order_num from orderitems where prod_id = 'TNT2');
+ERROR HY000: Blocking read wait timeout
+select cust_id from orders where order_num in (select order_num from orderitems where prod_id = 'TNT2');
+# Connection con2
+begin;
+select cust_id from orders where order_num in (select order_num from orderitems where prod_id = 'TNT2');
+# Connection con3
+begin;
+select cust_id from orders where order_num in (select order_num from orderitems where prod_id = 'TNT2') /*STS! 426807937862210045 */;
+# Connection default
+xa commit 'tst' cts 426807937862210046;
+# Connection con1
+cust_id
+10001
+10004
+xa end 'tst1';
+xa rollback 'tst1';
+# Connection con2
+cust_id
+10001
+10004
+rollback;
+# Connection con3
+cust_id
+10001
+10004
+rollback;
+#
+# Select ... inner join ... using(...)
+#
+# Connection default
+xa start 'tst';
+update vendors set vend_address = '234 Main Street' where vend_id = 1001;
+xa end 'tst';
+xa prepare 'tst';
+# Connection con1
+xa start 'tst1' /*STS! 426807937862210050 */;
+select vend_name, prod_name, prod_price from vendors inner join products using(vend_id);
+ERROR HY000: Blocking read wait timeout
+select vend_name, prod_name, prod_price from vendors inner join products using(vend_id);
+# Connection con2
+begin;
+select vend_name, prod_name, prod_price from vendors inner join products using(vend_id);
+# Connection con3
+begin;
+select vend_name, prod_name, prod_price from vendors inner join products using(vend_id) /*STS! 426807937862210048 */;
+# Connection default
+xa commit 'tst' cts 426807937862210049;
+# Connection con1
+vend_name	prod_name	prod_price
+Anvils R Us	.5 ton anvil	5.99
+Anvils R Us	1 ton anvil	9.99
+Anvils R Us	2 ton anvil	14.99
+LT Supplies	Fuses	3.42
+LT Supplies	Oil can	8.99
+ACME	Detonator	13.00
+ACME	Bird seed	10.00
+ACME	Carrots	2.50
+ACME	Safe	50.00
+ACME	Sling	4.49
+ACME	TNT (1 stick)	2.50
+ACME	TNT (5 sticks)	10.00
+ACME	TNT (1 stick)	2.50
+Jet Set	JetPack 1000	35.00
+Jet Set	JetPack 2000	55.00
+xa end 'tst1';
+xa rollback 'tst1';
+# Connection con2
+vend_name	prod_name	prod_price
+Anvils R Us	.5 ton anvil	5.99
+Anvils R Us	1 ton anvil	9.99
+Anvils R Us	2 ton anvil	14.99
+LT Supplies	Fuses	3.42
+LT Supplies	Oil can	8.99
+ACME	Detonator	13.00
+ACME	Bird seed	10.00
+ACME	Carrots	2.50
+ACME	Safe	50.00
+ACME	Sling	4.49
+ACME	TNT (1 stick)	2.50
+ACME	TNT (5 sticks)	10.00
+ACME	TNT (1 stick)	2.50
+Jet Set	JetPack 1000	35.00
+Jet Set	JetPack 2000	55.00
+rollback;
+# Connection con3
+vend_name	prod_name	prod_price
+Anvils R Us	.5 ton anvil	5.99
+Anvils R Us	1 ton anvil	9.99
+Anvils R Us	2 ton anvil	14.99
+LT Supplies	Fuses	3.42
+LT Supplies	Oil can	8.99
+ACME	Detonator	13.00
+ACME	Bird seed	10.00
+ACME	Carrots	2.50
+ACME	Safe	50.00
+ACME	Sling	4.49
+ACME	TNT (1 stick)	2.50
+ACME	TNT (5 sticks)	10.00
+ACME	TNT (1 stick)	2.50
+Jet Set	JetPack 1000	35.00
+Jet Set	JetPack 2000	55.00
+rollback;
+#
+# Select ... where ... regexp ...
+#
+# Connection default
+xa start 'tst';
+update vendors set vend_address = '1001 5th Avenue' where vend_id = 1004;
+xa end 'tst';
+xa prepare 'tst';
+# Connection con1
+xa start 'tst1' /*STS! 426807937862210053 */;
+select vend_name from vendors where vend_name regexp '\\.' order by vend_name;
+ERROR HY000: Blocking read wait timeout
+select vend_name from vendors where vend_name regexp '\\.' order by vend_name;
+# Connection con2
+begin;
+select vend_name from vendors where vend_name regexp '\\.' order by vend_name;
+# Connection con3
+begin;
+select vend_name from vendors where vend_name regexp '\\.' order by vend_name /*STS! 426807937862210051 */;
+# Connection default
+xa commit 'tst' cts 426807937862210052;
+# Connection con1
+vend_name
+Furball Inc.
+xa end 'tst1';
+xa rollback 'tst1';
+# Connection con2
+vend_name
+Furball Inc.
+rollback;
+# Connection con3
+vend_name
+Furball Inc.
+rollback;
+#
+# Cross join
+#
+# Connection default
+xa start 'tst';
+update vendors set vend_address = '1002 5th Avenue' where vend_id = 1004;
+xa end 'tst';
+xa prepare 'tst';
+# Connection con1
+xa start 'tst1' /*STS! 426807937862210056 */;
+select vend_name, prod_name, prod_price from vendors, products order by vend_name, prod_name limit 3;
+ERROR HY000: Blocking read wait timeout
+select vend_name, prod_name, prod_price from vendors, products order by vend_name, prod_name limit 3;
+# Connection con2
+begin;
+select vend_name, prod_name, prod_price from vendors, products order by vend_name, prod_name limit 3;
+# Connection con3
+begin;
+select vend_name, prod_name, prod_price from vendors, products order by vend_name, prod_name limit 3 /*STS! 426807937862210054 */;
+# Connection default
+xa commit 'tst' cts 426807937862210055;
+# Connection con1
+vend_name	prod_name	prod_price
+ACME	.5 ton anvil	5.99
+ACME	1 ton anvil	9.99
+ACME	2 ton anvil	14.99
+xa end 'tst1';
+xa rollback 'tst1';
+# Connection con2
+vend_name	prod_name	prod_price
+ACME	.5 ton anvil	5.99
+ACME	1 ton anvil	9.99
+ACME	2 ton anvil	14.99
+rollback;
+# Connection con3
+vend_name	prod_name	prod_price
+ACME	.5 ton anvil	5.99
+ACME	1 ton anvil	9.99
+ACME	2 ton anvil	14.99
+rollback;
+#
+# Select concat(...) ...
+#
+# Connection default
+xa start 'tst';
+update vendors set vend_address = '1003 5th Avenue' where vend_id = 1004;
+xa end 'tst';
+xa prepare 'tst';
+# Connection con1
+xa start 'tst1' /*STS! 426807937862210059 */;
+select concat(vend_name, '(', vend_address, ')') from vendors order by vend_name;
+ERROR HY000: Blocking read wait timeout
+select concat(vend_name, '(', vend_address, ')') from vendors order by vend_name;
+# Connection con2
+begin;
+select concat(vend_name, '(', vend_address, ')') from vendors order by vend_name;
+# Connection con3
+begin;
+select concat(vend_name, '(', vend_address, ')') from vendors order by vend_name /*STS! 426807937862210057 */;
+# Connection default
+xa commit 'tst' cts 426807937862210058;
+# Connection con1
+concat(vend_name, '(', vend_address, ')')
+ACME(555 High Street)
+Anvils R Us(234 Main Street)
+Furball Inc.(1003 5th Avenue)
+Jet Set(42 Galaxy Road)
+Jouets Et Ours(1 Rue Amusement)
+LT Supplies(500 Park Street)
+xa end 'tst1';
+xa rollback 'tst1';
+# Connection con2
+concat(vend_name, '(', vend_address, ')')
+ACME(555 High Street)
+Anvils R Us(234 Main Street)
+Furball Inc.(1002 5th Avenue)
+Jet Set(42 Galaxy Road)
+Jouets Et Ours(1 Rue Amusement)
+LT Supplies(500 Park Street)
+rollback;
+# Connection con3
+concat(vend_name, '(', vend_address, ')')
+ACME(555 High Street)
+Anvils R Us(234 Main Street)
+Furball Inc.(1002 5th Avenue)
+Jet Set(42 Galaxy Road)
+Jouets Et Ours(1 Rue Amusement)
+LT Supplies(500 Park Street)
+rollback;
+#
+# Select concat(..., format(currency-numbers,...)) ...
+#
+# Connection default
+xa start 'tst';
+update products set prod_desc = '.5 ton anvil, white, complete with handy hook' where prod_id = 'ANV01';
+xa end 'tst';
+xa prepare 'tst';
+# Connection con1
+xa start 'tst1' /*STS! 426807937862210062 */;
+select concat('USD', format(prod_price, 2)) as price from products;
+ERROR HY000: Blocking read wait timeout
+select concat('USD', format(prod_price, 2)) as price from products;
+# Connection con2
+begin;
+select concat('USD', format(prod_price, 2)) as price from products;
+# Connection con3
+begin;
+select concat('USD', format(prod_price, 2)) as price from products /*STS! 426807937862210060 */;
+# Connection default
+xa commit 'tst' cts 426807937862210061;
+# Connection con1
+price
+USD5.99
+USD9.99
+USD14.99
+USD13.00
+USD10.00
+USD2.50
+USD3.42
+USD35.00
+USD55.00
+USD8.99
+USD50.00
+USD4.49
+USD2.50
+USD10.00
+USD2.50
+xa end 'tst1';
+xa rollback 'tst1';
+# Connection con2
+price
+USD5.99
+USD9.99
+USD14.99
+USD13.00
+USD10.00
+USD2.50
+USD3.42
+USD35.00
+USD55.00
+USD8.99
+USD50.00
+USD4.49
+USD2.50
+USD10.00
+USD2.50
+rollback;
+# Connection con3
+price
+USD5.99
+USD9.99
+USD14.99
+USD13.00
+USD10.00
+USD2.50
+USD3.42
+USD35.00
+USD55.00
+USD8.99
+USD50.00
+USD4.49
+USD2.50
+USD10.00
+USD2.50
+rollback;
+#
+# Select ... where Date(datetime) = ...
+#
+# Connection default
+xa start 'tst';
+update orders set order_date = '2005-09-09' where cust_id = 10001;
+xa end 'tst';
+xa prepare 'tst';
+# Connection con1
+xa start 'tst1' /*STS! 426807937862210065 */;
+select cust_id, order_num from orders where Date(order_date) = '2005-09-09';
+ERROR HY000: Blocking read wait timeout
+select cust_id, order_num from orders where Date(order_date) = '2005-09-09';
+# Connection con2
+begin;
+select cust_id, order_num from orders where Date(order_date) = '2005-09-09';
+# Connection con3
+begin;
+select cust_id, order_num from orders where Date(order_date) = '2005-09-09' /*STS! 426807937862210063 */;
+# Connection default
+xa commit 'tst' cts 426807937862210064;
+# Connection con1
+cust_id	order_num
+10001	20005
+10001	20009
+xa end 'tst1';
+xa rollback 'tst1';
+# Connection con2
+cust_id	order_num
+rollback;
+# Connection con3
+cust_id	order_num
+rollback;
+#
+# Select using LTRIM() function
+#
+# Connection default
+xa start 'tst';
+update vendors set vend_address = '1004 5th Avenue' where vend_id = 1004;
+xa end 'tst';
+xa prepare 'tst';
+# Connection con1
+xa start 'tst1' /*STS! 426807937862210068 */;
+select concat(rtrim(vend_name), '(', rtrim(vend_address), ')') as vend_title from vendors order by vend_name;
+ERROR HY000: Blocking read wait timeout
+select concat(rtrim(vend_name), '(', rtrim(vend_address), ')') as vend_title from vendors order by vend_name;
+# Connection con2
+begin;
+select concat(rtrim(vend_name), '(', rtrim(vend_address), ')') as vend_title from vendors order by vend_name;
+# Connection con3
+begin;
+select concat(rtrim(vend_name), '(', rtrim(vend_address), ')') as vend_title from vendors order by vend_name /*STS! 426807937862210066 */;
+# Connection default
+xa commit 'tst' cts 426807937862210067;
+# Connection con1
+vend_title
+ACME(555 High Street)
+Anvils R Us(234 Main Street)
+Furball Inc.(1004 5th Avenue)
+Jet Set(42 Galaxy Road)
+Jouets Et Ours(1 Rue Amusement)
+LT Supplies(500 Park Street)
+xa end 'tst1';
+xa rollback 'tst1';
+# Connection con2
+vend_title
+ACME(555 High Street)
+Anvils R Us(234 Main Street)
+Furball Inc.(1003 5th Avenue)
+Jet Set(42 Galaxy Road)
+Jouets Et Ours(1 Rue Amusement)
+LT Supplies(500 Park Street)
+rollback;
+# Connection con3
+vend_title
+ACME(555 High Street)
+Anvils R Us(234 Main Street)
+Furball Inc.(1003 5th Avenue)
+Jet Set(42 Galaxy Road)
+Jouets Et Ours(1 Rue Amusement)
+LT Supplies(500 Park Street)
+rollback;
+#
+# Select with savepoints
+#
+# Connection default
+xa start 'tst';
+update customers set cust_address = 'China' where cust_id = 10002;
+savepoint sp1;
+update customers set cust_address = 'USA' where cust_id = 10002;
+# Connection con1
+xa start 'tst1' /*STS! 426807937862210071 */;
+select * from customers;
+cust_id	cust_name	cust_address
+10001	e	China
+10002	Mouse House	NULL
+10003	Wascals	1 Sunny Place
+10004	Yosemite Place	829 Riverside Drive
+10005	E Fudd	4545 53rd Street
+10006	Coyote Inc.	200 Maple Lane
+select * from customers;
+# Connection con2
+begin;
+select * from customers;
+# Connection con3
+begin;
+select * from customers /*STS! 426807937862210069 */;
+# Connection default
+rollback to sp1;
+xa end 'tst';
+xa prepare 'tst';
+# Connection con1
+cust_id	cust_name	cust_address
+10001	e	China
+10002	Mouse House	NULL
+10003	Wascals	1 Sunny Place
+10004	Yosemite Place	829 Riverside Drive
+10005	E Fudd	4545 53rd Street
+10006	Coyote Inc.	200 Maple Lane
+select * from customers;
+ERROR HY000: Blocking read wait timeout
+select * from customers;
+# Connection con2
+cust_id	cust_name	cust_address
+10001	e	China
+10002	Mouse House	NULL
+10003	Wascals	1 Sunny Place
+10004	Yosemite Place	829 Riverside Drive
+10005	E Fudd	4545 53rd Street
+10006	Coyote Inc.	200 Maple Lane
+select * from customers;
+# Connection con3
+cust_id	cust_name	cust_address
+10001	e	China
+10002	Mouse House	NULL
+10003	Wascals	1 Sunny Place
+10004	Yosemite Place	829 Riverside Drive
+10005	E Fudd	4545 53rd Street
+10006	Coyote Inc.	200 Maple Lane
+select * from customers /*STS! 426807937862210069 */;
+# Connection default
+xa commit 'tst' cts 426807937862210070;
+# Connection con1
+cust_id	cust_name	cust_address
+10001	e	China
+10002	Mouse House	China
+10003	Wascals	1 Sunny Place
+10004	Yosemite Place	829 Riverside Drive
+10005	E Fudd	4545 53rd Street
+10006	Coyote Inc.	200 Maple Lane
+xa end 'tst1';
+xa rollback 'tst1';
+# Connection con2
+cust_id	cust_name	cust_address
+10001	e	China
+10002	Mouse House	NULL
+10003	Wascals	1 Sunny Place
+10004	Yosemite Place	829 Riverside Drive
+10005	E Fudd	4545 53rd Street
+10006	Coyote Inc.	200 Maple Lane
+rollback;
+# Connection con3
+cust_id	cust_name	cust_address
+10001	e	China
+10002	Mouse House	NULL
+10003	Wascals	1 Sunny Place
+10004	Yosemite Place	829 Riverside Drive
+10005	E Fudd	4545 53rd Street
+10006	Coyote Inc.	200 Maple Lane
+rollback;
+#
+# Select ... where soundex(...) = ...
+#
+# Connection default
+xa start 'tst';
+update customers set cust_address = '4545 99rd Street' where cust_id = 1005;
+xa end 'tst';
+xa prepare 'tst';
+# Connection con1
+xa start 'tst1' /*STS! 426807937862210074 */;
+##########################################################
+##### TODO here should fail with error, but it successes.
+##########################################################
+select * from customers where soundex(cust_name) = soundex('E Food');
+cust_id	cust_name	cust_address
+10005	E Fudd	4545 53rd Street
+select * from customers where soundex(cust_name) = soundex('E Food');
+# Connection con2
+begin;
+select * from customers where soundex(cust_name) = soundex('E Food');
+# Connection con3
+begin;
+select * from customers where soundex(cust_name) = soundex('E Food') /*STS! 426807937862210072 */;
+# Connection default
+xa commit 'tst' cts 426807937862210073;
+# Connection con1
+cust_id	cust_name	cust_address
+10005	E Fudd	4545 53rd Street
+xa end 'tst1';
+xa rollback 'tst1';
+# Connection con2
+cust_id	cust_name	cust_address
+10005	E Fudd	4545 53rd Street
+rollback;
+# Connection con3
+cust_id	cust_name	cust_address
+10005	E Fudd	4545 53rd Street
+rollback;
+drop table customers, orderitems, orders, products, vendors;

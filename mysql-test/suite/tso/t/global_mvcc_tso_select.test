@@ -1,0 +1,1402 @@
+--echo #
+--echo # Test of select 
+--echo #
+
+--echo # Set --innodb-blocking-read-wait-timeout=1000
+let $restart_parameters = "restart: --innodb-blocking-read-wait-timeout=1000";
+source include/restart_mysqld.inc;
+connect (con1,localhost,root,,);
+connect (con2,localhost,root,,);
+connect (con3,localhost,root,,);
+
+--disable_warnings
+drop table if exists customers, orderitems, orders, vendors;
+--enable_warnings
+
+--echo # Connection default
+connection default;
+--echo #
+--echo # Create customers table
+--echo #
+
+create table customers
+(
+  cust_id int NOT NULL AUTO_INCREMENT,
+  cust_name char(50) NOT NULL ,
+  cust_address char(50) NULL ,
+  PRIMARY KEY (cust_id)
+) ENGINE=InnoDB CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+--echo #
+--echo # Create orderitems table
+--echo #
+
+create table orderitems
+(
+  order_num  int          NOT NULL ,
+  order_item int          NOT NULL ,
+  prod_id    char(10)     NOT NULL ,
+  quantity   int          NOT NULL ,
+  item_price decimal(8,2) NOT NULL ,
+  PRIMARY KEY (order_num, order_item)
+) ENGINE=InnoDB CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+--echo #
+--echo # Create orders table
+--echo #
+
+create table orders
+(
+  order_num  int      NOT NULL AUTO_INCREMENT,
+  order_date datetime NOT NULL ,
+  cust_id    int      NOT NULL ,
+  PRIMARY KEY (order_num)
+) ENGINE=InnoDB CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+--echo #
+--echo # Create products table
+--echo #
+
+create table products
+(
+  prod_id    char(10)      NOT NULL,
+  vend_id    int           NOT NULL ,
+  prod_name  char(255)     NOT NULL ,
+  prod_price decimal(8,2)  NOT NULL ,
+  prod_desc  text          NULL ,
+  PRIMARY KEY(prod_id)
+) ENGINE=InnoDB CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+--echo #
+--echo # Create vendors table
+--echo #
+
+create table vendors
+(
+  vend_id      int      NOT NULL AUTO_INCREMENT,
+  vend_name    char(50) NOT NULL ,
+  vend_address char(50) NULL ,
+  PRIMARY KEY (vend_id)
+) ENGINE=InnoDB CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+--echo #
+--echo # Define foreign keys
+--echo #
+alter table orderitems add CONSTRAINT fk_orderitems_orders FOREIGN KEY (order_num) REFERENCES orders (order_num);
+alter table orderitems add CONSTRAINT fk_orderitems_products FOREIGN KEY (prod_id) REFERENCES products (prod_id);
+alter table orders add CONSTRAINT fk_orders_customers FOREIGN KEY (cust_id) REFERENCES customers (cust_id);
+alter table products add CONSTRAINT fk_products_vendors FOREIGN KEY (vend_id) REFERENCES vendors (vend_id);
+
+--echo #
+--echo # Populate customers table
+--echo #
+insert into customers(cust_id, cust_name, cust_address)
+values(10001, 'Coyote Inc.', '200 Maple Lane');
+insert into customers(cust_id, cust_name, cust_address)
+values(10002, 'Mouse House', '333 Fromage Lane');
+insert into customers(cust_id, cust_name, cust_address)
+values(10003, 'Wascals', '1 Sunny Place');
+insert into customers(cust_id, cust_name, cust_address)
+values(10004, 'Yosemite Place', '829 Riverside Drive');
+insert into customers(cust_id, cust_name, cust_address)
+values(10005, 'E Fudd', '4545 53rd Street');
+
+
+--echo #
+--echo # Populate vendors table
+--echo #
+insert into vendors(vend_id, vend_name, vend_address)
+values(1001,'Anvils R Us','123 Main Street');
+insert into vendors(vend_id, vend_name, vend_address)
+values(1002,'LT Supplies','500 Park Street');
+insert into vendors(vend_id, vend_name, vend_address)
+values(1003,'ACME','555 High Street');
+insert into vendors(vend_id, vend_name, vend_address)
+values(1004,'Furball Inc.','1000 5th Avenue');
+insert into vendors(vend_id, vend_name, vend_address)
+values(1005,'Jet Set','42 Galaxy Road');
+insert into vendors(vend_id, vend_name, vend_address)
+values(1006,'Jouets Et Ours','1 Rue Amusement');
+
+--echo #
+--echo # Populate products table
+--echo #
+insert into products(prod_id, vend_id, prod_name, prod_price, prod_desc)
+values('ANV01', 1001, '.5 ton anvil', 5.99, '.5 ton anvil, black, complete with handy hook');
+insert into products(prod_id, vend_id, prod_name, prod_price, prod_desc)
+values('ANV02', 1001, '1 ton anvil', 9.99, '1 ton anvil, black, complete with handy hook and carrying case');
+insert into products(prod_id, vend_id, prod_name, prod_price, prod_desc)
+values('ANV03', 1001, '2 ton anvil', 14.99, '2 ton anvil, black, complete with handy hook and carrying case');
+insert into products(prod_id, vend_id, prod_name, prod_price, prod_desc)
+values('OL1', 1002, 'Oil can', 8.99, 'Oil can, red');
+insert into products(prod_id, vend_id, prod_name, prod_price, prod_desc)
+values('FU1', 1002, 'Fuses', 3.42, '1 dozen, extra long');
+insert into products(prod_id, vend_id, prod_name, prod_price, prod_desc)
+values('SLING', 1003, 'Sling', 4.49, 'Sling, one size fits all');
+insert into products(prod_id, vend_id, prod_name, prod_price, prod_desc)
+values('TNT1', 1003, 'TNT (1 stick)', 2.50, 'TNT, red, single stick');
+insert into products(prod_id, vend_id, prod_name, prod_price, prod_desc)
+values('TNT2', 1003, 'TNT (5 sticks)', 10, 'TNT, red, pack of 10 sticks');
+insert into products(prod_id, vend_id, prod_name, prod_price, prod_desc)
+values('FB', 1003, 'Bird seed', 10, 'Large bag (suitable for road runners)');
+insert into products(prod_id, vend_id, prod_name, prod_price, prod_desc)
+values('FC', 1003, 'Carrots', 2.50, 'Carrots (rabbit hunting season only)');
+insert into products(prod_id, vend_id, prod_name, prod_price, prod_desc)
+values('SAFE', 1003, 'Safe', 50, 'Safe with combination lock');
+insert into products(prod_id, vend_id, prod_name, prod_price, prod_desc)
+values('DTNTR', 1003, 'Detonator', 13, 'Detonator (plunger powered), fuses not included');
+insert into products(prod_id, vend_id, prod_name, prod_price, prod_desc)
+values('JP1000', 1005, 'JetPack 1000', 35, 'JetPack 1000, intended for single use');
+insert into products(prod_id, vend_id, prod_name, prod_price, prod_desc)
+values('JP2000', 1005, 'JetPack 2000', 55, 'JetPack 2000, multi-use');
+
+--echo #
+--echo # Populate orders table
+--echo #
+insert into orders(order_num, order_date, cust_id)
+values(20005, '2005-09-01', 10001);
+insert into orders(order_num, order_date, cust_id)
+values(20006, '2005-09-12', 10003);
+insert into orders(order_num, order_date, cust_id)
+values(20007, '2005-09-30', 10004);
+insert into orders(order_num, order_date, cust_id)
+values(20008, '2005-10-03', 10005);
+insert into orders(order_num, order_date, cust_id)
+values(20009, '2005-10-08', 10001);
+
+--echo #
+--echo # Populate orderitems table
+--echo #
+insert into orderitems(order_num, order_item, prod_id, quantity, item_price)
+values(20005, 1, 'ANV01', 10, 5.99);
+insert into orderitems(order_num, order_item, prod_id, quantity, item_price)
+values(20005, 2, 'ANV02', 3, 9.99);
+insert into orderitems(order_num, order_item, prod_id, quantity, item_price)
+values(20005, 3, 'TNT2', 5, 10);
+insert into orderitems(order_num, order_item, prod_id, quantity, item_price)
+values(20005, 4, 'FB', 1, 10);
+insert into orderitems(order_num, order_item, prod_id, quantity, item_price)
+values(20006, 1, 'JP2000', 1, 55);
+insert into orderitems(order_num, order_item, prod_id, quantity, item_price)
+values(20007, 1, 'TNT2', 100, 10);
+insert into orderitems(order_num, order_item, prod_id, quantity, item_price)
+values(20008, 1, 'FC', 50, 2.50);
+insert into orderitems(order_num, order_item, prod_id, quantity, item_price)
+values(20009, 1, 'FB', 1, 10);
+insert into orderitems(order_num, order_item, prod_id, quantity, item_price)
+values(20009, 2, 'OL1', 1, 8.99);
+insert into orderitems(order_num, order_item, prod_id, quantity, item_price)
+values(20009, 3, 'SLING', 1, 4.49);
+insert into orderitems(order_num, order_item, prod_id, quantity, item_price)
+values(20009, 4, 'ANV03', 1, 14.99);
+
+xa start 'tst';
+update customers set cust_name = "a" where cust_id = 10001;
+xa end 'tst';
+xa prepare 'tst';
+
+--echo #
+--echo # Normal select
+--echo #
+--echo # Connection con1
+connection con1;
+xa start 'tst1' /*STS! 426807937862210002 */;
+--error ER_BLOCKING_READ_WAIT_TIMEOUT
+select * from customers;
+send select * from customers;
+
+--echo # Connection con2
+connection con2;
+begin;
+send select * from customers;
+
+--echo # Connection con3
+connection con3;
+begin;
+send select * from customers /*STS! 426807937862210000 */;
+
+--echo # Connection default
+connection default;
+xa commit 'tst' cts 426807937862210001;
+
+--echo # Connection con1
+connection con1;
+reap;
+xa end 'tst1';
+xa rollback 'tst1';
+
+--echo # Connection con2
+connection con2;
+reap;
+rollback;
+
+--echo # Connection con3
+connection con3;
+reap;
+rollback;
+
+--echo #
+--echo # Update without change, then select
+--echo #
+--echo # Connection default
+connection default;
+xa start 'tst';
+update customers set cust_name = "b" where cust_id = 10001;
+xa end 'tst';
+xa prepare 'tst';
+
+--echo # Connection con1
+connection con1;
+xa start 'tst1' /*STS! 426807937862210005 */;
+--error ER_BLOCKING_READ_WAIT_TIMEOUT
+select * from customers;
+send select * from customers;
+
+--echo # Connection con2
+connection con2;
+begin;
+send select * from customers;
+
+--echo # Connection con3
+connection con3;
+begin;
+send select * from customers /*STS! 426807937862210003 */;
+
+--echo # Connection default
+connection default;
+xa commit 'tst' cts 426807937862210004;
+
+--echo # Connection con1
+connection con1;
+reap;
+xa end 'tst1';
+xa rollback 'tst1';
+
+--echo # Connection con2
+connection con2;
+reap;
+rollback;
+
+--echo # Connection con3
+connection con3;
+reap;
+rollback;
+
+--echo #
+--echo # Select ... inner join ... on ...
+--echo #
+--echo # Connection default
+connection default;
+xa start 'tst';
+insert into products(prod_id, vend_id, prod_name, prod_price, prod_desc)
+VALUES('TNT3', 1003, 'TNT (1 stick)', 2.50, 'TNT, red, single stick');
+xa end 'tst';
+xa prepare 'tst';
+
+--echo # Connection con1
+connection con1;
+xa start 'tst1' /*STS! 426807937862210008 */;
+--error ER_BLOCKING_READ_WAIT_TIMEOUT
+select vend_name, prod_name, prod_price from vendors inner join products on vendors.vend_id=products.vend_id;
+send select vend_name, prod_name, prod_price from vendors inner join products on vendors.vend_id=products.vend_id;
+
+--echo # Connection con2
+connection con2;
+begin;
+send select vend_name, prod_name, prod_price from vendors inner join products on vendors.vend_id=products.vend_id;
+
+--echo # Connection con3
+connection con3;
+begin;
+send select vend_name, prod_name, prod_price from vendors inner join products on vendors.vend_id=products.vend_id /*STS! 426807937862210006 */;
+
+--echo # Connection default
+connection default;
+xa commit 'tst' cts 426807937862210007;
+
+--echo # Connection con1
+connection con1;
+reap;
+xa end 'tst1';
+xa rollback 'tst1';
+
+--echo # Connection con2
+connection con2;
+reap;
+rollback;
+
+--echo # Connection con3
+connection con3;
+reap;
+rollback;
+
+--echo #
+--echo # Select ... left outer join  ... on ...
+--echo #
+--echo # Connection default
+connection default;
+xa start 'tst';
+update customers set cust_address="China" where cust_id="10001";
+xa end 'tst';
+xa prepare 'tst';
+
+--echo # Connection con1
+connection con1;
+xa start 'tst1' /*STS! 426807937862210011 */;
+--error ER_BLOCKING_READ_WAIT_TIMEOUT
+select customers.cust_id, orders.order_num from customers left outer join orders on customers.cust_id=orders.cust_id;
+send select customers.cust_id, orders.order_num from customers left outer join orders on customers.cust_id=orders.cust_id;
+
+--echo # Connection con2
+connection con2;
+begin;
+send select customers.cust_id, orders.order_num from customers left outer join orders on customers.cust_id=orders.cust_id;
+
+--echo # Connection con3
+connection con3;
+begin;
+send select customers.cust_id, orders.order_num from customers left outer join orders on customers.cust_id=orders.cust_id /*STS! 426807937862210009 */;
+
+--echo # Connection default
+connection default;
+xa commit 'tst' cts 426807937862210010;
+
+--echo # Connection con1
+connection con1;
+reap;
+xa end 'tst1';
+xa rollback 'tst1';
+
+--echo # Connection con2
+connection con2;
+reap;
+rollback;
+
+--echo # Connection con3
+connection con3;
+reap;
+rollback;
+
+--echo #
+--echo # Self join
+--echo #
+--echo # Connection default
+connection default;
+xa start 'tst';
+update products set prod_desc = "TNT, black, single stick" where prod_id = "TNT3";
+xa end 'tst';
+xa prepare 'tst';
+
+--echo # Connection con1
+connection con1;
+xa start 'tst1' /*STS! 426807937862210014 */;
+--error ER_BLOCKING_READ_WAIT_TIMEOUT
+select p1.prod_id, p1.prod_name from products as p1, products as p2 where p1.vend_id = p2. vend_id and p2.prod_id = 'DTNTR';
+send select p1.prod_id, p1.prod_name from products as p1, products as p2 where p1.vend_id = p2. vend_id and p2.prod_id = 'DTNTR';
+
+--echo # Connection con2
+connection con2;
+begin;
+send select p1.prod_id, p1.prod_name from products as p1, products as p2 where p1.vend_id = p2. vend_id and p2.prod_id = 'DTNTR';
+
+--echo # Connection con3
+connection con3;
+begin;
+send select p1.prod_id, p1.prod_name from products as p1, products as p2 where p1.vend_id = p2. vend_id and p2.prod_id = 'DTNTR' /*STS! 426807937862210012 */;
+
+--echo # Connection default
+connection default;
+xa commit 'tst' cts 426807937862210013;
+
+--echo # Connection con1
+connection con1;
+reap;
+xa end 'tst1';
+xa rollback 'tst1';
+
+--echo # Connection con2
+connection con2;
+reap;
+rollback;
+
+--echo # Connection con3
+connection con3;
+reap;
+rollback;
+
+--echo #
+--echo # Select join with aggregate function
+--echo # Select ... inner join ... on ... group by ...
+--echo # Connection default
+connection default;
+xa start 'tst';
+update customers set cust_name = 'c' where cust_id = 10001;
+xa end 'tst';
+xa prepare 'tst';
+
+--echo # Connection con1
+connection con1;
+xa start 'tst1' /*STS! 426807937862210017 */;
+--error ER_BLOCKING_READ_WAIT_TIMEOUT
+select customers.cust_name, customers.cust_id, count(orders.order_num) as num_ord from customers inner join orders on customers.cust_id =  orders.cust_id group by customers.cust_id;
+send select customers.cust_name, customers.cust_id, count(orders.order_num) as num_ord from customers inner join orders on customers.cust_id =  orders.cust_id group by customers.cust_id;
+
+--echo # Connection con2
+connection con2;
+begin;
+send select customers.cust_name, customers.cust_id, count(orders.order_num) as num_ord from customers inner join orders on customers.cust_id =  orders.cust_id group by customers.cust_id;
+
+--echo # Connection con3
+connection con3;
+begin;
+send select customers.cust_name, customers.cust_id, count(orders.order_num) as num_ord from customers inner join orders on customers.cust_id =  orders.cust_id group by customers.cust_id /*STS! 426807937862210015 */;
+
+--echo # Connection default
+connection default;
+xa commit 'tst' cts 426807937862210016;
+
+--echo # Connection con1
+connection con1;
+reap;
+xa end 'tst1';
+xa rollback 'tst1';
+
+--echo # Connection con2
+connection con2;
+reap;
+rollback;
+
+--echo # Connection con3
+connection con3;
+reap;
+rollback;
+
+--echo #
+--echo # Select ... limit ...
+--echo #
+--echo # Connection default
+connection default;
+xa start 'tst';
+update customers set cust_name = 'd' where cust_id = 10001;
+xa end 'tst';
+xa prepare 'tst';
+
+--echo # Connection con1
+connection con1;
+xa start 'tst1' /*STS! 426807937862210020 */;
+--error ER_BLOCKING_READ_WAIT_TIMEOUT
+select cust_name from customers limit 3;
+send select cust_name from customers limit 3;
+
+--echo # Connection con2
+connection con2;
+begin;
+send select cust_name from customers limit 3;
+
+--echo # Connection con3
+connection con3;
+begin;
+send select cust_name from customers limit 3 /*STS! 426807937862210018 */;
+
+--echo # Connection default
+connection default;
+xa commit 'tst' cts 426807937862210019;
+
+--echo # Connection con1
+connection con1;
+reap;
+xa end 'tst1';
+xa rollback 'tst1';
+
+--echo # Connection con2
+connection con2;
+reap;
+rollback;
+
+--echo # Connection con3
+connection con3;
+reap;
+rollback;
+
+--echo #
+--echo # Select ... where ... like ...
+--echo #
+--echo # Connection default
+connection default;
+xa start 'tst';
+update customers set cust_name = 'e' where cust_id = 10001;
+xa end 'tst';
+xa prepare 'tst';
+
+--echo # Connection con1
+connection con1;
+xa start 'tst1' /*STS! 426807937862210023 */;
+--error ER_BLOCKING_READ_WAIT_TIMEOUT
+select cust_name from customers where cust_address like '%Sunny _lace%';
+send select cust_name from customers where cust_address like '%Sunny _lace%';
+
+--echo # Connection con2
+connection con2;
+begin;
+send select cust_name from customers where cust_address like '%Sunny _lace%';
+
+--echo # Connection con3
+connection con3;
+begin;
+send select cust_name from customers where cust_address like '%Sunny _lace%' /*STS! 426807937862210021 */;
+
+--echo # Connection default
+connection default;
+xa commit 'tst' cts 426807937862210022;
+
+--echo # Connection con1
+connection con1;
+reap;
+xa end 'tst1';
+xa rollback 'tst1';
+
+--echo # Connection con2
+connection con2;
+reap;
+rollback;
+
+--echo # Connection con3
+connection con3;
+reap;
+rollback;
+
+--echo #
+--echo # Distinct function
+--echo #
+--echo # Connection default
+connection default;
+xa start 'tst';
+update products set prod_desc = '0.5 ton anvil, black, complete with handy hook' where prod_id = 'ANV01';
+xa end 'tst';
+xa prepare 'tst';
+
+--echo # Connection con1
+connection con1;
+xa start 'tst1' /*STS! 426807937862210026 */;
+--error ER_BLOCKING_READ_WAIT_TIMEOUT
+select avg(distinct prod_price) as avg_price from products where vend_id = 1001;
+send select avg(distinct prod_price) as avg_price from products where vend_id = 1001;
+
+--echo # Connection con2
+connection con2;
+begin;
+send select avg(distinct prod_price) as avg_price from products where vend_id = 1001;
+
+--echo # Connection con3
+connection con3;
+begin;
+send select avg(distinct prod_price) as avg_price from products where vend_id = 1001 /*STS! 426807937862210024 */;
+
+--echo # Connection default
+connection default;
+xa commit 'tst' cts 426807937862210025;
+
+--echo # Connection con1
+connection con1;
+reap;
+xa end 'tst1';
+xa rollback 'tst1';
+
+--echo # Connection con2
+connection con2;
+reap;
+rollback;
+
+--echo # Connection con3
+connection con3;
+reap;
+rollback;
+
+--echo #
+--echo # Select ... where ... between ...
+--echo #
+--echo # Connection default
+connection default;
+xa start 'tst';
+update products set prod_desc = '0.5 ton anvil, red, complete with handy hook' where prod_id = 'ANV01';
+xa end 'tst';
+xa prepare 'tst';
+
+--echo # Connection con1
+connection con1;
+xa start 'tst1' /*STS! 426807937862210029 */;
+--error ER_BLOCKING_READ_WAIT_TIMEOUT
+select prod_name, prod_price from products where prod_price between 5 and 10;
+send select prod_name, prod_price from products where prod_price between 5 and 10;
+
+--echo # Connection con2
+connection con2;
+begin;
+send select prod_name, prod_price from products where prod_price between 5 and 10;
+
+--echo # Connection con3
+connection con3;
+begin;
+send select prod_name, prod_price from products where prod_price between 5 and 10 /*STS! 426807937862210027 */;
+
+--echo # Connection default
+connection default;
+xa commit 'tst' cts 426807937862210028;
+
+--echo # Connection con1
+connection con1;
+reap;
+xa end 'tst1';
+xa rollback 'tst1';
+
+--echo # Connection con2
+connection con2;
+reap;
+rollback;
+
+--echo # Connection con3
+connection con3;
+reap;
+rollback;
+
+--echo #
+--echo # select ... group by ... having ...
+--echo #
+--echo # Connection default
+connection default;
+xa start 'tst';
+update orders set order_date = '2005-09-02' where cust_id = 10001;
+xa end 'tst';
+xa prepare 'tst';
+
+--echo # Connection con1
+connection con1;
+xa start 'tst1' /*STS! 426807937862210032 */;
+--error ER_BLOCKING_READ_WAIT_TIMEOUT
+select cust_id, count(*) as orders from orders group by cust_id having count(*) >= 2;
+send select cust_id, count(*) as orders from orders group by cust_id having count(*) >= 2;
+
+--echo # Connection con2
+connection con2;
+begin;
+send select cust_id, count(*) as orders from orders group by cust_id having count(*) >= 2;
+
+--echo # Connection con3
+connection con3;
+begin;
+send select cust_id, count(*) as orders from orders group by cust_id having count(*) >= 2 /*STS! 426807937862210030 */;
+
+--echo # Connection default
+connection default;
+xa commit 'tst' cts 426807937862210031;
+
+--echo # Connection con1
+connection con1;
+reap;
+xa end 'tst1';
+xa rollback 'tst1';
+
+--echo # Connection con2
+connection con2;
+reap;
+rollback;
+
+--echo # Connection con3
+connection con3;
+reap;
+rollback;
+
+--echo #
+--echo # Select if(...) ... 
+--echo #
+--echo # Connection default
+connection default;
+xa start 'tst';
+update products set prod_desc = '0.5 ton anvil, green, complete with handy hook' where prod_id = 'ANV01';
+xa end 'tst';
+xa prepare 'tst';
+
+--echo # Connection con1
+connection con1;
+xa start 'tst1' /*STS! 426807937862210035 */;
+--error ER_BLOCKING_READ_WAIT_TIMEOUT
+select prod_name, if(prod_price > 30, 'high price', 'low proce') as price from products limit 5;
+send select prod_name, if(prod_price > 30, 'high price', 'low proce') as price from products limit 5;
+
+--echo # Connection con2
+connection con2;
+begin;
+send select prod_name, if(prod_price > 30, 'high price', 'low proce') as price from products limit 5;
+
+--echo # Connection con3
+connection con3;
+begin;
+send select prod_name, if(prod_price > 30, 'high price', 'low proce') as price from products limit 5 /*STS! 426807937862210033 */;
+
+--echo # Connection default
+connection default;
+xa commit 'tst' cts 426807937862210034;
+
+--echo # Connection con1
+connection con1;
+reap;
+xa end 'tst1';
+xa rollback 'tst1';
+
+--echo # Connection con2
+connection con2;
+reap;
+rollback;
+
+--echo # Connection con3
+connection con3;
+reap;
+rollback;
+
+--echo #
+--echo # Select ... union Select ...
+--echo #
+--echo # Connection default
+connection default;
+xa start 'tst';
+update products set prod_desc = '0.5 ton anvil, pink, complete with handy hook' where prod_id = 'ANV01';
+xa end 'tst';
+xa prepare 'tst';
+
+--echo # Connection con1
+connection con1;
+xa start 'tst1' /*STS! 426807937862210038 */;
+--error ER_BLOCKING_READ_WAIT_TIMEOUT
+select vend_id, prod_id, prod_price from products where prod_price <= 6
+union 
+select vend_id, prod_id, prod_price from products where vend_id in (1001, 1002);
+send select vend_id, prod_id, prod_price from products where prod_price <= 6
+union 
+select vend_id, prod_id, prod_price from products where vend_id in (1001, 1002);
+
+--echo # Connection con2
+connection con2;
+begin;
+send select vend_id, prod_id, prod_price from products where prod_price <= 6
+union 
+select vend_id, prod_id, prod_price from products where vend_id in (1001, 1002);
+
+--echo # Connection con3
+connection con3;
+begin;
+send select vend_id, prod_id, prod_price from products where prod_price <= 6
+union 
+select vend_id, prod_id, prod_price from products where vend_id in (1001, 1002) /*STS! 426807937862210036 */;
+
+--echo # Connection default
+connection default;
+xa commit 'tst' cts 426807937862210037;
+
+--echo # Connection con1
+connection con1;
+reap;
+xa end 'tst1';
+xa rollback 'tst1';
+
+--echo # Connection con2
+connection con2;
+reap;
+rollback;
+
+--echo # Connection con3
+connection con3;
+reap;
+rollback;
+
+--echo #
+--echo # Select ... where ... is NULL
+--echo #
+--echo # Connection default
+connection default;
+xa start 'tst';
+update customers set cust_address = NULL where cust_id = 10002;
+xa end 'tst';
+xa prepare 'tst';
+
+--echo # Connection con1
+connection con1;
+xa start 'tst1' /*STS! 426807937862210041 */;
+--error ER_BLOCKING_READ_WAIT_TIMEOUT
+select cust_id from customers where cust_address is NULL;
+send select cust_id from customers where cust_address is NULL;
+
+--echo # Connection con2
+connection con2;
+begin;
+send select cust_id from customers where cust_address is NULL;
+
+--echo # Connection con3
+connection con3;
+begin;
+send select cust_id from customers where cust_address is NULL /*STS! 426807937862210039 */;
+
+--echo # Connection default
+connection default;
+xa commit 'tst' cts 426807937862210040;
+
+--echo # Connection con1
+connection con1;
+reap;
+xa end 'tst1';
+xa rollback 'tst1';
+
+--echo # Connection con2
+connection con2;
+reap;
+rollback;
+
+--echo # Connection con3
+connection con3;
+reap;
+rollback;
+
+--echo #
+--echo # When inserting data, missing auto-increament column, then select
+--echo #
+--echo # Connection default
+connection default;
+xa start 'tst';
+insert into customers(cust_name, cust_address)
+VALUES('Coyote Inc.', '200 Maple Lane');
+xa end 'tst';
+xa prepare 'tst';
+
+--echo # Connection con1
+connection con1;
+xa start 'tst1' /*STS! 426807937862210044 */;
+--error ER_BLOCKING_READ_WAIT_TIMEOUT
+select cust_id from customers where cust_id = 10006;
+send select cust_id from customers where cust_id = 10006;
+
+--echo # Connection con2
+connection con2;
+begin;
+send select cust_id from customers where cust_id = 10006;
+
+--echo # Connection con3
+connection con3;
+begin;
+send select cust_id from customers where cust_id = 10006 /*STS! 426807937862210042 */;
+
+--echo # Connection default
+connection default;
+xa commit 'tst' cts 426807937862210043;
+
+--echo # Connection con1
+connection con1;
+reap;
+xa end 'tst1';
+xa rollback 'tst1';
+
+--echo # Connection con2
+connection con2;
+reap;
+rollback;
+
+--echo # Connection con3
+connection con3;
+reap;
+rollback;
+
+--echo #
+--echo # Sub query, select ... where ... in (Select ...)
+--echo #
+--echo # Connection default
+connection default;
+xa start 'tst';
+update orders set order_date = '2005-09-05' where cust_id = 10001;
+xa end 'tst';
+xa prepare 'tst';
+
+--echo # Connection con1
+connection con1;
+xa start 'tst1' /*STS! 426807937862210047 */;
+--error ER_BLOCKING_READ_WAIT_TIMEOUT
+select cust_id from orders where order_num in (select order_num from orderitems where prod_id = 'TNT2');
+send select cust_id from orders where order_num in (select order_num from orderitems where prod_id = 'TNT2');
+
+--echo # Connection con2
+connection con2;
+begin;
+send select cust_id from orders where order_num in (select order_num from orderitems where prod_id = 'TNT2');
+
+--echo # Connection con3
+connection con3;
+begin;
+send select cust_id from orders where order_num in (select order_num from orderitems where prod_id = 'TNT2') /*STS! 426807937862210045 */;
+
+--echo # Connection default
+connection default;
+xa commit 'tst' cts 426807937862210046;
+
+--echo # Connection con1
+connection con1;
+reap;
+xa end 'tst1';
+xa rollback 'tst1';
+
+--echo # Connection con2
+connection con2;
+reap;
+rollback;
+
+--echo # Connection con3
+connection con3;
+reap;
+rollback;
+
+--echo #
+--echo # Select ... inner join ... using(...)
+--echo #
+--echo # Connection default
+connection default;
+xa start 'tst';
+update vendors set vend_address = '234 Main Street' where vend_id = 1001;
+xa end 'tst';
+xa prepare 'tst';
+
+--echo # Connection con1
+connection con1;
+xa start 'tst1' /*STS! 426807937862210050 */;
+--error ER_BLOCKING_READ_WAIT_TIMEOUT
+select vend_name, prod_name, prod_price from vendors inner join products using(vend_id);
+send select vend_name, prod_name, prod_price from vendors inner join products using(vend_id);
+
+--echo # Connection con2
+connection con2;
+begin;
+send select vend_name, prod_name, prod_price from vendors inner join products using(vend_id);
+
+--echo # Connection con3
+connection con3;
+begin;
+send select vend_name, prod_name, prod_price from vendors inner join products using(vend_id) /*STS! 426807937862210048 */;
+
+--echo # Connection default
+connection default;
+xa commit 'tst' cts 426807937862210049;
+
+--echo # Connection con1
+connection con1;
+reap;
+xa end 'tst1';
+xa rollback 'tst1';
+
+--echo # Connection con2
+connection con2;
+reap;
+rollback;
+
+--echo # Connection con3
+connection con3;
+reap;
+rollback;
+
+--echo #
+--echo # Select ... where ... regexp ...
+--echo #
+--echo # Connection default
+connection default;
+xa start 'tst';
+update vendors set vend_address = '1001 5th Avenue' where vend_id = 1004;
+xa end 'tst';
+xa prepare 'tst';
+
+--echo # Connection con1
+connection con1;
+xa start 'tst1' /*STS! 426807937862210053 */;
+--error ER_BLOCKING_READ_WAIT_TIMEOUT
+select vend_name from vendors where vend_name regexp '\\.' order by vend_name;
+send select vend_name from vendors where vend_name regexp '\\.' order by vend_name;
+
+--echo # Connection con2
+connection con2;
+begin;
+send select vend_name from vendors where vend_name regexp '\\.' order by vend_name;
+
+--echo # Connection con3
+connection con3;
+begin;
+send select vend_name from vendors where vend_name regexp '\\.' order by vend_name /*STS! 426807937862210051 */;
+
+--echo # Connection default
+connection default;
+xa commit 'tst' cts 426807937862210052;
+
+--echo # Connection con1
+connection con1;
+reap;
+xa end 'tst1';
+xa rollback 'tst1';
+
+--echo # Connection con2
+connection con2;
+reap;
+rollback;
+
+--echo # Connection con3
+connection con3;
+reap;
+rollback;
+
+--echo #
+--echo # Cross join
+--echo #
+--echo # Connection default
+connection default;
+xa start 'tst';
+update vendors set vend_address = '1002 5th Avenue' where vend_id = 1004;
+xa end 'tst';
+xa prepare 'tst';
+
+--echo # Connection con1
+connection con1;
+xa start 'tst1' /*STS! 426807937862210056 */;
+--error ER_BLOCKING_READ_WAIT_TIMEOUT
+select vend_name, prod_name, prod_price from vendors, products order by vend_name, prod_name limit 3;
+send select vend_name, prod_name, prod_price from vendors, products order by vend_name, prod_name limit 3;
+
+--echo # Connection con2
+connection con2;
+begin;
+send select vend_name, prod_name, prod_price from vendors, products order by vend_name, prod_name limit 3;
+
+--echo # Connection con3
+connection con3;
+begin;
+send select vend_name, prod_name, prod_price from vendors, products order by vend_name, prod_name limit 3 /*STS! 426807937862210054 */;
+
+--echo # Connection default
+connection default;
+xa commit 'tst' cts 426807937862210055;
+
+--echo # Connection con1
+connection con1;
+reap;
+xa end 'tst1';
+xa rollback 'tst1';
+
+--echo # Connection con2
+connection con2;
+reap;
+rollback;
+
+--echo # Connection con3
+connection con3;
+reap;
+rollback;
+
+--echo #
+--echo # Select concat(...) ...
+--echo #
+--echo # Connection default
+connection default;
+xa start 'tst';
+update vendors set vend_address = '1003 5th Avenue' where vend_id = 1004;
+xa end 'tst';
+xa prepare 'tst';
+
+--echo # Connection con1
+connection con1;
+xa start 'tst1' /*STS! 426807937862210059 */;
+--error ER_BLOCKING_READ_WAIT_TIMEOUT
+select concat(vend_name, '(', vend_address, ')') from vendors order by vend_name;
+send select concat(vend_name, '(', vend_address, ')') from vendors order by vend_name;
+
+--echo # Connection con2
+connection con2;
+begin;
+send select concat(vend_name, '(', vend_address, ')') from vendors order by vend_name;
+
+--echo # Connection con3
+connection con3;
+begin;
+send select concat(vend_name, '(', vend_address, ')') from vendors order by vend_name /*STS! 426807937862210057 */;
+
+--echo # Connection default
+connection default;
+xa commit 'tst' cts 426807937862210058;
+
+--echo # Connection con1
+connection con1;
+reap;
+xa end 'tst1';
+xa rollback 'tst1';
+
+--echo # Connection con2
+connection con2;
+reap;
+rollback;
+
+--echo # Connection con3
+connection con3;
+reap;
+rollback;
+
+--echo #
+--echo # Select concat(..., format(currency-numbers,...)) ...
+--echo #
+--echo # Connection default
+connection default;
+xa start 'tst';
+update products set prod_desc = '.5 ton anvil, white, complete with handy hook' where prod_id = 'ANV01';
+xa end 'tst';
+xa prepare 'tst';
+
+--echo # Connection con1
+connection con1;
+xa start 'tst1' /*STS! 426807937862210062 */;
+--error ER_BLOCKING_READ_WAIT_TIMEOUT
+select concat('USD', format(prod_price, 2)) as price from products;
+send select concat('USD', format(prod_price, 2)) as price from products;
+
+--echo # Connection con2
+connection con2;
+begin;
+send select concat('USD', format(prod_price, 2)) as price from products;
+
+--echo # Connection con3
+connection con3;
+begin;
+send select concat('USD', format(prod_price, 2)) as price from products /*STS! 426807937862210060 */;
+
+--echo # Connection default
+connection default;
+xa commit 'tst' cts 426807937862210061;
+
+--echo # Connection con1
+connection con1;
+reap;
+xa end 'tst1';
+xa rollback 'tst1';
+
+--echo # Connection con2
+connection con2;
+reap;
+rollback;
+
+--echo # Connection con3
+connection con3;
+reap;
+rollback;
+
+--echo #
+--echo # Select ... where Date(datetime) = ...
+--echo #
+--echo # Connection default
+connection default;
+xa start 'tst';
+update orders set order_date = '2005-09-09' where cust_id = 10001;
+xa end 'tst';
+xa prepare 'tst';
+
+--echo # Connection con1
+connection con1;
+xa start 'tst1' /*STS! 426807937862210065 */;
+--error ER_BLOCKING_READ_WAIT_TIMEOUT
+select cust_id, order_num from orders where Date(order_date) = '2005-09-09';
+send select cust_id, order_num from orders where Date(order_date) = '2005-09-09';
+
+--echo # Connection con2
+connection con2;
+begin;
+send select cust_id, order_num from orders where Date(order_date) = '2005-09-09';
+
+--echo # Connection con3
+connection con3;
+begin;
+send select cust_id, order_num from orders where Date(order_date) = '2005-09-09' /*STS! 426807937862210063 */;
+
+--echo # Connection default
+connection default;
+xa commit 'tst' cts 426807937862210064;
+
+--echo # Connection con1
+connection con1;
+reap;
+xa end 'tst1';
+xa rollback 'tst1';
+
+--echo # Connection con2
+connection con2;
+reap;
+rollback;
+
+--echo # Connection con3
+connection con3;
+reap;
+rollback;
+
+--echo #
+--echo # Select using LTRIM() function
+--echo #
+--echo # Connection default
+connection default;
+xa start 'tst';
+update vendors set vend_address = '1004 5th Avenue' where vend_id = 1004;
+xa end 'tst';
+xa prepare 'tst';
+
+--echo # Connection con1
+connection con1;
+xa start 'tst1' /*STS! 426807937862210068 */;
+--error ER_BLOCKING_READ_WAIT_TIMEOUT
+select concat(rtrim(vend_name), '(', rtrim(vend_address), ')') as vend_title from vendors order by vend_name;
+send select concat(rtrim(vend_name), '(', rtrim(vend_address), ')') as vend_title from vendors order by vend_name;
+
+--echo # Connection con2
+connection con2;
+begin;
+send select concat(rtrim(vend_name), '(', rtrim(vend_address), ')') as vend_title from vendors order by vend_name;
+
+--echo # Connection con3
+connection con3;
+begin;
+send select concat(rtrim(vend_name), '(', rtrim(vend_address), ')') as vend_title from vendors order by vend_name /*STS! 426807937862210066 */;
+
+--echo # Connection default
+connection default;
+xa commit 'tst' cts 426807937862210067;
+
+--echo # Connection con1
+connection con1;
+reap;
+xa end 'tst1';
+xa rollback 'tst1';
+
+--echo # Connection con2
+connection con2;
+reap;
+rollback;
+
+--echo # Connection con3
+connection con3;
+reap;
+rollback;
+
+--echo #
+--echo # Select with savepoints
+--echo #
+--echo # Connection default
+connection default;
+xa start 'tst';
+update customers set cust_address = 'China' where cust_id = 10002;
+savepoint sp1;
+update customers set cust_address = 'USA' where cust_id = 10002;
+
+--echo # Connection con1
+connection con1;
+xa start 'tst1' /*STS! 426807937862210071 */;
+select * from customers;
+send select * from customers;
+
+--echo # Connection con2
+connection con2;
+begin;
+send select * from customers;
+
+--echo # Connection con3
+connection con3;
+begin;
+send select * from customers /*STS! 426807937862210069 */;
+
+--echo # Connection default
+connection default;
+rollback to sp1;
+xa end 'tst';
+xa prepare 'tst';
+
+--echo # Connection con1
+connection con1;
+reap;
+--error ER_BLOCKING_READ_WAIT_TIMEOUT
+select * from customers;
+send select * from customers;
+
+--echo # Connection con2
+connection con2;
+reap;
+send select * from customers;
+
+--echo # Connection con3
+connection con3;
+reap;
+send select * from customers /*STS! 426807937862210069 */;
+
+--echo # Connection default
+connection default;
+xa commit 'tst' cts 426807937862210070;
+
+--echo # Connection con1
+connection con1;
+reap;
+xa end 'tst1';
+xa rollback 'tst1';
+
+--echo # Connection con2
+connection con2;
+reap;
+rollback;
+
+--echo # Connection con3
+connection con3;
+reap;
+rollback;
+
+--echo #
+--echo # Select ... where soundex(...) = ...
+--echo #
+--echo # Connection default
+connection default;
+xa start 'tst';
+update customers set cust_address = '4545 99rd Street' where cust_id = 1005;
+xa end 'tst';
+xa prepare 'tst';
+
+--echo # Connection con1
+connection con1;
+xa start 'tst1' /*STS! 426807937862210074 */;
+--echo ##########################################################
+--echo ##### TODO here should fail with error, but it successes.
+--echo ##########################################################
+#--error ER_BLOCKING_READ_WAIT_TIMEOUT
+select * from customers where soundex(cust_name) = soundex('E Food');
+send select * from customers where soundex(cust_name) = soundex('E Food');
+
+--echo # Connection con2
+connection con2;
+begin;
+send select * from customers where soundex(cust_name) = soundex('E Food');
+
+--echo # Connection con3
+connection con3;
+begin;
+send select * from customers where soundex(cust_name) = soundex('E Food') /*STS! 426807937862210072 */;
+
+--echo # Connection default
+connection default;
+xa commit 'tst' cts 426807937862210073;
+
+--echo # Connection con1
+connection con1;
+reap;
+xa end 'tst1';
+xa rollback 'tst1';
+
+--echo # Connection con2
+connection con2;
+reap;
+rollback;
+
+--echo # Connection con3
+connection con3;
+reap;
+rollback;
+
+
+drop table customers, orderitems, orders, products, vendors;

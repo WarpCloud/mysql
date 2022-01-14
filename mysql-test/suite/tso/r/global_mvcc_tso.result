@@ -1,0 +1,473 @@
+connection default;
+CREATE TABLE history (
+hist_id int DEFAULT NULL,
+#  h_c_id int DEFAULT NULL,
+#  h_c_d_id int DEFAULT NULL,
+h_c_w_id int DEFAULT NULL,
+#  h_d_id int DEFAULT NULL,
+#  h_w_id int DEFAULT NULL,
+#  h_date timestamp NULL DEFAULT NULL,
+#  h_amount decimal(6,2) DEFAULT NULL,
+#  h_data varchar(24) DEFAULT NULL,
+KEY i_h_c_w_id (h_c_w_id)
+) ENGINE=InnoDB;
+xa start 'tst';
+INSERT INTO history (hist_id, h_c_w_id) VALUES(1, 90001);
+INSERT INTO history (hist_id, h_c_w_id) VALUES(2, 90002);
+xa end 'tst';
+xa prepare 'tst';
+connection con1
+xa start 'wht' /*STS! 426807937862210002 */;
+select * from history ;
+connection con2
+begin;
+select * from history;
+connection con3
+begin;
+select * from history /*STS! 426807937862210000 */;
+connection default;
+sleep 0.1;
+xa commit 'tst' cts 426807937862210001;
+connection con1
+hist_id	h_c_w_id
+1	90001
+2	90002
+xa end 'wht';
+xa rollback 'wht';
+connection con2
+hist_id	h_c_w_id
+rollback;
+connection con3
+hist_id	h_c_w_id
+rollback;
+connection default;
+xa start 'tst';
+update history set h_c_w_id=90011 where hist_id=1;
+delete from history where hist_id=2;
+connection con1;
+set session transaction isolation level READ COMMITTED;
+SELECT @@session.transaction_isolation;
+@@session.transaction_isolation
+READ-COMMITTED
+begin;
+select * from history /*STS! 426807937862210010 */;
+hist_id	h_c_w_id
+1	90001
+2	90002
+connection default;
+xa end 'tst';
+xa prepare 'tst';
+xa commit 'tst' cts 426807937862210012;
+connection con2;
+select * from history /*STS! 426807937862210011 */;
+hist_id	h_c_w_id
+1	90001
+2	90002
+connection con3;
+select * from history /*STS! 426807937862210013 */;
+hist_id	h_c_w_id
+1	90011
+connection con1;
+select * from history;
+hist_id	h_c_w_id
+1	90001
+2	90002
+select * from history /*STS! 426807937862210014 */;
+hist_id	h_c_w_id
+1	90011
+rollback;
+set session transaction isolation level REPEATABLE READ;
+SELECT @@session.transaction_isolation;
+@@session.transaction_isolation
+REPEATABLE-READ
+connection default;
+CREATE TABLE gmt (
+t1 int,
+t2 varchar(10),
+primary key(t1)
+) ENGINE=InnoDB;
+insert into gmt values(1, 'a');
+connection con1;
+begin;
+select * from gmt /*STS! 426807937862210020 */;
+t1	t2
+1	a
+connection default;
+xa start 'tst';
+delete from gmt where t1=1;
+insert into gmt values(1, 'b');
+insert into gmt values(2, 'c');
+delete from gmt where t1=2;
+xa end 'tst';
+xa prepare 'tst';
+xa commit 'tst' cts 426807937862210021;
+connection con1;
+select * from gmt;
+t1	t2
+1	a
+rollback;
+connection con2;
+select * from gmt /*STS! 426807937862210022 */;
+t1	t2
+1	b
+connection con1;
+insert into gmt values(4, 'd');
+begin;
+select * from gmt /*STS! 426807937862210030 */;
+t1	t2
+1	b
+4	d
+select * from history;
+hist_id	h_c_w_id
+1	90011
+connection default;
+xa start 'tst';
+update gmt set t1=3 where t1=1;
+update history set h_c_w_id=90021 where h_c_w_id=90011;
+update gmt set t2='e' where t1=4;
+update gmt set t1=5 where t2='e';
+xa end 'tst';
+xa prepare 'tst';
+xa commit 'tst' cts 426807937862210031;
+connection con1;
+select * from gmt;
+t1	t2
+1	b
+4	d
+select * from history;
+hist_id	h_c_w_id
+1	90011
+rollback;
+connection con2;
+select * from gmt /*STS! 426807937862210032 */;
+t1	t2
+3	b
+5	e
+select * from history /*STS! 426807937862210032 */;
+hist_id	h_c_w_id
+1	90021
+connection con1;
+begin;
+select * from gmt /*STS! 426807937862210040 */;
+t1	t2
+3	b
+5	e
+connection default;
+xa start 'tst';
+insert into gmt values(1, 'a');
+xa end 'tst';
+xa prepare 'tst';
+connection con1;
+select * from gmt;
+connection default;
+sleep 0.1
+xa rollback 'tst';
+connection con1;
+t1	t2
+3	b
+5	e
+select * from gmt;
+t1	t2
+3	b
+5	e
+rollback;
+connection con2;
+select * from gmt /*STS! 426807937862210041 */;
+t1	t2
+3	b
+5	e
+connection default;
+xa start 'tst';
+insert into gmt values(1, 'a');
+select * from gmt /*STS! 426807937862210050 */;
+t1	t2
+1	a
+3	b
+5	e
+xa end 'tst';
+xa prepare 'tst';
+xa rollback 'tst';
+connection con1;
+begin;
+select * from gmt /*STS! 426807937862210060 */;
+t1	t2
+3	b
+5	e
+connection default;
+xa start 'tst';
+insert into gmt values(1, 'a');
+xa end 'tst';
+xa commit 'tst' one phase;
+update gmt set t2='c' where t1=3;
+begin;
+delete from gmt where t1=5;
+commit;
+connection con1;
+select * from gmt;
+t1	t2
+3	b
+5	e
+rollback;
+connection con2;
+select * from gmt /*STS! 426807937862210061 */;
+t1	t2
+1	a
+3	c
+connection default;
+xa start 'tst';
+insert into gmt values(5, 'e');
+connection con1;
+select * from gmt;
+t1	t2
+1	a
+3	c
+connection default;
+xa end 'tst';
+xa prepare 'tst';
+connection con1;
+select * from gmt;
+t1	t2
+1	a
+3	c
+connection default;
+xa commit 'tst' cts 426807937862210070;
+connection con1;
+select * from gmt;
+t1	t2
+1	a
+3	c
+5	e
+begin;
+select count(*) from history /*STS! 426807937862210080 */;
+count(*)
+1
+select count(*) from history where h_c_w_id > 90000;
+count(*)
+1
+connection default;
+xa start 'xst';
+insert into history values(2, 90021);
+insert into history values(3, 90031);
+xa end 'xst';
+xa prepare 'xst';
+xa commit 'xst' cts 426807937862210082;
+connection con2;
+begin;
+select count(*) from history /*STS! 426807937862210081 */;
+count(*)
+1
+select count(*) from history where h_c_w_id > 90000;
+count(*)
+1
+rollback;
+connection con1;
+select count(*) from history;
+count(*)
+1
+select count(*) from history where h_c_w_id > 90000;
+count(*)
+1
+rollback;
+connection con3;
+begin;
+select count(*) from history /*STS! 426807937862210083 */;
+count(*)
+3
+select count(*) from history where h_c_w_id > 90000;
+count(*)
+3
+rollback;
+connection default;
+xa start 'tst' /*STS! 426807937862210090 */;
+insert into gmt values(6, 'f');
+connection con1;
+xa start 'tst1' /*STS! 426807937862210090 */;
+select * from gmt;
+t1	t2
+1	a
+3	c
+5	e
+6	f
+xa end 'tst1';
+xa rollback 'tst1';
+connection con2;
+xa start 'tst2' /*STS! 426807937862210091 */;
+select * from gmt;
+t1	t2
+1	a
+3	c
+5	e
+xa end 'tst2';
+xa rollback 'tst2';
+connection default;
+xa end 'tst';
+xa rollback 'tst';
+connection default;
+xa start 'tst';
+update gmt set t2='aa' where t1=1;
+xa end 'tst';
+xa prepare 'tst';
+connection con1;
+xa start 'tst2';
+insert into history values(4, 90041);
+xa end 'tst2';
+xa prepare 'tst2';
+# restart
+connection con4;
+begin;
+select * from gmt /*STS! 426807937862210101 */;
+connection con5;
+xa commit 'tst' cts 426807937862210100;
+xa rollback 'tst2';
+connection con4;
+t1	t2
+1	aa
+3	c
+5	e
+select count(*) from history where h_c_w_id > 90000;
+count(*)
+3
+rollback;
+select * from gmt /*STS! 426807937862210102 */;
+t1	t2
+1	aa
+3	c
+5	e
+drop table history;
+drop table gmt;
+# --------------------------------------------------------------------------------
+# Tests for blocking read timeout, the default --innodb-blocking-read-wait-timeout
+# is 5 seconds.
+# --------------------------------------------------------------------------------
+# restart: --innodb-blocking-read-wait-timeout=5000
+connection brt0;
+CREATE TABLE brt (
+t1 int,
+t2 varchar(10),
+primary key(t1)
+) ENGINE=InnoDB;
+insert into brt values(1, 'a');
+xa start 'tst1';
+update brt set t2 = 'b' where t1 = 1;
+xa end 'tst1';
+xa prepare 'tst1';
+connection brt1
+xa start 'tst2' /*STS! 426807937862210000 */;
+select * from brt where t1 = 1 ;
+connection brt0;
+xa commit 'tst1' cts 426807937862209999;
+connection brt1
+ERROR HY000: Blocking read wait timeout
+xa end 'tst2';
+xa prepare 'tst2';
+xa commit 'tst2';
+connection brt0;
+xa start 'tst1';
+update brt set t2 = 'a' where t1 = 1;
+xa end 'tst1';
+xa prepare 'tst1';
+connection brt1
+xa start 'tst2' /*STS! 426807937862210002 */;
+select * from brt where t1 = 1 ;
+ERROR HY000: Blocking read wait timeout
+select * from brt where t1 = 1 ;
+ERROR HY000: Blocking read wait timeout
+select * from brt where t1 = 1 ;
+connection brt0;
+xa commit 'tst1' cts 426807937862210001;
+connection brt1
+ERROR HY000: Blocking read wait timeout
+xa end 'tst2';
+xa prepare 'tst2';
+xa commit 'tst2';
+connection brt0;
+xa start 'tst1';
+update brt set t2 = 'c' where t1 = 1;
+xa end 'tst1';
+xa prepare 'tst1';
+connection brt1
+xa start 'tst2' /*STS! 426807937862210004 */;
+select * from brt where t1 = 1 ;
+connection brt0;
+xa commit 'tst1' cts 426807937862210003;
+connection brt1
+t1	t2
+1	c
+xa end 'tst2';
+xa prepare 'tst2';
+xa commit 'tst2';
+# restart: --innodb-blocking-read-wait-timeout=15000
+connection brt2;
+xa start 'tst1';
+update brt set t2 = 'd' where t1 = 1;
+xa end 'tst1';
+xa prepare 'tst1';
+connection brt3
+xa start 'tst2' /*STS! 426807937862210006 */;
+select * from brt where t1 = 1 ;
+connection brt2;
+xa commit 'tst1' cts 426807937862210005;
+connection brt3
+t1	t2
+1	d
+xa end 'tst2';
+xa prepare 'tst2';
+xa commit 'tst2';
+connection brt2;
+xa start 'tst1';
+update brt set t2 = 'e' where t1 = 1;
+xa end 'tst1';
+xa prepare 'tst1';
+connection brt3
+xa start 'tst2' /*STS! 426807937862210008 */;
+select * from brt where t1 = 1 ;
+connection brt2;
+xa commit 'tst1' cts 426807937862210007;
+connection brt3
+ERROR HY000: Blocking read wait timeout
+xa end 'tst2';
+xa prepare 'tst2';
+xa commit 'tst2';
+# --------------------------------------------------------------------------------
+# End of Tests for blocking read timeout.
+# --------------------------------------------------------------------------------
+drop table brt;
+# --------------------------------------------------------------------------------
+# Tests for sts time window.
+# --------------------------------------------------------------------------------
+# restart: --innodb-purge-time-window=10
+connection sts0;
+CREATE TABLE sts (
+t1 int,
+t2 varchar(10),
+primary key(t1)
+) ENGINE=InnoDB;
+insert into sts values(1, 'a');
+xa start 'tst1';
+update sts set t2 = 'b' where t1 = 1;
+xa end 'tst1';
+xa prepare 'tst1';
+xa commit 'tst1' cts 426807932621702144;
+connection sts1;
+select * from sts /*STS! 426807930000000000 */;
+ERROR 45000: The value of this sts is too small and may query the data that has been purged
+select * from sts /*STS! 426807930000000001 */;
+t1	t2
+1	a
+# --------------------------------------------------------------------------------
+# End of Tests for sts time window.
+# --------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------
+# Tests for --innodb_enable_tso.
+# --------------------------------------------------------------------------------
+# restart: --innodb_enable_tso=false
+select * from sts /*STS! 426807930000000001 */;
+ERROR 45000: The switch of innodb_enable_tso is closed, but sts is not null
+# restart: --innodb_enable_tso
+select * from sts /*STS! 426807930000000001 */;
+t1	t2
+1	a
+# --------------------------------------------------------------------------------
+# End of Tests for --innodb_enable_tso.
+# --------------------------------------------------------------------------------
+drop table sts;
